@@ -1,9 +1,6 @@
 # PersonalGPT
 
 Chat assistant pribadi untuk dokumen, kode, dan produktivitas.
-Bagian dari [Roadmap AI Engineer](../) — proyek yang bertumbuh tiap minggu.
-
-**Status: Minggu 2 — Persistence & Multi-Conversation (Go BE)**
 
 Architecture: **Next.js FE** ←→ **Go BE** ←→ **Neon Postgres**
 
@@ -34,7 +31,7 @@ portofolio-ai-aulia/
 - **Anthropic Messages API** via raw `net/http` + SSE parsing (streaming chat + Haiku title gen)
 - Implements **Vercel AI SDK data stream protocol** sehingga FE pakai `useChat` tanpa perubahan
 
-Mengikuti [eDOT NextJS Coding Standards](https://docs.google.com/document/d/1yL8Y18aeYPcwqW1HnHO0BY7aiAhAqIpbLIREKU-tgCY/edit) yang diadaptasi (shadcn/ui menggantikan `@edot/sdk-ui-react`, BE Go terpisah biar "one axios instance per backend service" beneran).
+Mengikuti yang diadaptasi (shadcn/ui menggantikan `@edot/sdk-ui-react`, BE Go terpisah biar "one axios instance per backend service" beneran).
 
 ## Quick Start
 
@@ -159,21 +156,6 @@ src/
 
 Lihat [backend/README.md](./backend/README.md) untuk struktur lengkap.
 
-## Roadmap (12 Minggu)
-
-- [x] **Minggu 1** — Setup + streaming chat
-- [x] **Minggu 2** — Persistence (Go BE + Neon Postgres + Drizzle→pgx) + multi-conversation + auto-title ← **kamu di sini**
-- [ ] **Minggu 3** — Auth (Auth.js Google OAuth) + Settings page
-- [ ] **Minggu 4** — Embeddings + pgvector
-- [ ] **Minggu 5** — RAG end-to-end + citation
-- [ ] **Minggu 6** — Hybrid search + reranking
-- [ ] **Minggu 7** — Tool calling (web search, fetch URL)
-- [ ] **Minggu 8** — Coding assistant tools
-- [ ] **Minggu 9** — Productivity tools (Calendar, Task)
-- [ ] **Minggu 10** — Long-term memory
-- [ ] **Minggu 11** — Evals + observability
-- [ ] **Minggu 12** — Polish, security, showcase
-
 ## Conventions
 
 **Commits** ikut [Conventional Commits](https://www.conventionalcommits.org/):
@@ -193,18 +175,6 @@ chore: bump pgx to v5.7.2
 - `cn()` untuk class composition — never `+` concat
 - No `any`, no `console.log` (pakai `console.warn` / `console.error`)
 - Provider dengan error guard di hook (throw kalau dipakai di luar provider)
-
-## What's Next (Minggu 3 — Auth & Polish)
-
-1. Add Auth.js (NextAuth) dengan Google OAuth di FE
-2. Add `users` table di BE migration + FK ke `user_id` di conversations
-3. JWT middleware di Go BE untuk validate session
-4. Settings page: pilih model, temperature slider, custom system prompt
-5. Keyboard shortcuts (Cmd+K untuk new chat, Cmd+/ untuk fokus input)
-6. Mobile responsive + dark mode toggle
-
-Detail lengkap di [Roadmap doc](https://docs.google.com/document/d/1yNJwtVLvIDWOd37nubd3-IQaeSPgBmbin-lANCMnh28/edit).
-
 ---
 
 Built by Aulia Afriza · 2026
