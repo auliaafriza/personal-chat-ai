@@ -1,0 +1,130 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
+
+	"github.com/auliaafriza/personalgpt-backend/internal/config"
+	"github.com/auliaafriza/personalgpt-backend/internal/db"
+	"github.com/auliaafriza/personalgpt-backend/internal/handler"
+	appmw "github.com/auliaafriza/personalgpt-backend/internal/middleware"
+	"github.com/auliaafriza/personalgpt-backend/internal/service"
+)
+
+func main() {
+	if err := run(); err != nil {
+		log.Fatalf("server fatal: %v", err)
+	}
+}
+
+func run() error {
+	// Config
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	log.Printf("→ Starting PersonalGPT backend (env=%s)…", cfg.Env)
+
+	// Database
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	log.Printf("✓ Database connected")
+
+	// Repositories
+	convRepo := db.NewConversationRepo(pool)
+	msgRepo := db.NewMessageRepo(pool)
+
+	// Services
+	anthropicSvc := service.NewGroq(cfg.GroqAPIKey)
+
+	// Handlers
+	convH := handler.NewConversationHandler(convRepo)
+	msgH := handler.NewMessageHandler(msgRepo)
+	titleH := handler.NewTitleHandler(convRepo, msgRepo, anthropicSvc)
+	chatH := handler.NewChatHandler(convRepo, msgRepo, anthropicSvc)
+
+	// Router
+	r := chi.NewRouter()
+
+	r.Use(appmw.Logger)
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   cfg.CORSOrigins,
+		AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Content-Type", "Authorization"},
+		ExposedHeaders:   []string{"X-Vercel-Ai-Data-Stream"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
+
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+
+	r.Route("/conversations", func(r chi.Router) {
+		r.Get("/", convH.List)
+		r.Post("/", convH.Create)
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", convH.Get)
+			r.Patch("/", convH.Update)
+			r.Delete("/", convH.Delete)
+			r.Get("/messages", msgH.List)
+			r.Post("/title", titleH.Generate)
+		})
+	})
+
+	r.Post("/chat", chatH.Stream)
+
+	// HTTP server with graceful shutdown
+	srv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		// No WriteTimeout — streaming responses can be long
+		IdleTimeout: 120 * time.Second,
+	}
+
+	serverErr := make(chan error, 1)
+	go func() {
+		log.Printf("→ Listening on http://localhost:%s", cfg.Port)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
+		}
+	}()
+
+	// Graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case err := <-serverErr:
+		return err
+	case sig := <-quit:
+		log.Printf("→ %s received, shutting down…", sig)
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return err
+	}
+	log.Printf("✓ Server stopped")
+	return nil
+}
