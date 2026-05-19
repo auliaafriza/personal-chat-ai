@@ -3,8 +3,6 @@
 Chat assistant pribadi untuk dokumen, kode, dan produktivitas.
 Bagian dari [Roadmap AI Engineer](../) — proyek yang bertumbuh tiap minggu.
 
-**Status: Minggu 3 — Auth, Settings & Polish**
-
 Architecture: **Next.js FE (Auth.js v5)** ←→ **Go BE (JWT-protected)** ←→ **Neon Postgres**
 
 ```
@@ -37,7 +35,7 @@ portofolio-ai-aulia/
 - **Groq Chat Completions API** (OpenAI-compatible) via raw `net/http` + SSE
 - Implements **Vercel AI SDK data stream protocol** sehingga FE pakai `useChat` tanpa perubahan
 
-Mengikuti [eDOT NextJS Coding Standards](https://docs.google.com/document/d/1yL8Y18aeYPcwqW1HnHO0BY7aiAhAqIpbLIREKU-tgCY/edit) yang diadaptasi (shadcn/ui menggantikan `@edot/sdk-ui-react`, BE Go terpisah biar "one axios instance per backend service" beneran).
+Mengikuti yang diadaptasi (shadcn/ui menggantikan `@edot/sdk-ui-react`, BE Go terpisah biar "one axios instance per backend service" beneran).
 
 ## Quick Start
 
