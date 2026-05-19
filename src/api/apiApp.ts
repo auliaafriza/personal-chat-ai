@@ -1,6 +1,8 @@
 import type { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from "axios"
 import axios from "axios"
 
+import { clearAuthToken, getAuthToken } from "./apiToken"
+
 /**
  * Single axios instance untuk Go BE (eDOT §6 — one axios instance per backend service).
  *
@@ -17,7 +19,16 @@ const apiApp = axios.create({
 })
 
 apiApp.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
+  async (config: InternalAxiosRequestConfig) => {
+    try {
+      const token = await getAuthToken()
+      config.headers.set("Authorization", `Bearer ${token}`)
+    } catch (err) {
+      // No session — let the request go through and let BE return 401.
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[apiApp] no auth token attached", err)
+      }
+    }
     if (process.env.NODE_ENV !== "production") {
       console.warn(`[apiApp] → ${config.method?.toUpperCase()} ${config.url}`)
     }
@@ -30,6 +41,10 @@ apiApp.interceptors.response.use(
   (response: AxiosResponse) => response.data,
   (error: AxiosError) => {
     const status = error.response?.status ?? 0
+    if (status === 401) {
+      // Token kemungkinan expired — invalidate cache; user akan re-fetch di request berikutnya.
+      clearAuthToken()
+    }
     console.error(`[apiApp] ✗ ${error.config?.url} → ${status}`, error.message)
     return Promise.reject(error)
   },

@@ -1,14 +1,22 @@
 "use client"
 
-import { Loader2, MessageSquarePlus } from "lucide-react"
+import { Loader2, MessageSquarePlus, X } from "lucide-react"
 import { useRouter, useParams } from "next/navigation"
+
+import { cn } from "@/lib/utils"
 
 import { useMutationCreateConversation } from "@/features/chat/services/conversation/post"
 import { useGetConversations } from "@/features/chat/services/conversation/list/get"
 
 import { ConversationItem } from "./ConversationItem"
+import { UserMenu } from "./UserMenu"
 
-export function Sidebar() {
+interface SidebarProps {
+  /** When provided, renders a close button in the header (mobile drawer). */
+  onClose?: () => void
+}
+
+export function Sidebar({ onClose }: SidebarProps) {
   const router = useRouter()
   const params = useParams<{ conversationId?: string }>()
   const activeId = params?.conversationId
@@ -22,6 +30,7 @@ export function Sidebar() {
       {
         onSuccess: (conv) => {
           router.push(`/chat/${conv.id}`)
+          onClose?.()
         },
       },
     )
@@ -34,12 +43,13 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-dvh w-64 shrink-0 flex-col border-r border-border bg-muted/30">
-      <div className="p-3">
+    <aside className="flex h-dvh w-full max-w-xs shrink-0 flex-col border-r border-border bg-muted/30 md:w-64">
+      <div className={cn("flex items-center gap-2 p-3", !onClose && "md:p-3")}>
         <button
           onClick={handleNewChat}
           disabled={createMutation.isPending}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium shadow-sm transition-colors hover:bg-accent disabled:opacity-50"
+          className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium shadow-sm transition-colors hover:bg-accent disabled:opacity-50"
+          title="Cmd/Ctrl + K"
         >
           {createMutation.isPending ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -48,6 +58,16 @@ export function Sidebar() {
           )}
           New chat
         </button>
+
+        {onClose ? (
+          <button
+            onClick={onClose}
+            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent"
+            aria-label="Close sidebar"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : null}
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2 pb-2">
@@ -75,9 +95,8 @@ export function Sidebar() {
         )}
       </nav>
 
-      <footer className="border-t border-border p-3 text-xs text-muted-foreground">
-        <p>PersonalGPT</p>
-        <p className="text-[10px]">Minggu 2 — Persistence</p>
+      <footer className="border-t border-border p-2">
+        <UserMenu />
       </footer>
     </aside>
   )

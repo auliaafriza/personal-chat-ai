@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/auliaafriza/personalgpt-backend/internal/db"
+	appmw "github.com/auliaafriza/personalgpt-backend/internal/middleware"
 	"github.com/auliaafriza/personalgpt-backend/internal/service"
 )
 
@@ -21,7 +23,22 @@ func NewTitleHandler(convRepo *db.ConversationRepo, msgRepo *db.MessageRepo, ai 
 
 // POST /conversations/{id}/title — generate dari 2 message pertama pakai Haiku.
 func (h *TitleHandler) Generate(w http.ResponseWriter, r *http.Request) {
+	user := appmw.UserFromCtx(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	id := chi.URLParam(r, "id")
+
+	// Ownership check
+	if _, err := h.convRepo.GetByUser(r.Context(), id, user.ID); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "conversation not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to verify conversation")
+		return
+	}
 
 	messages, err := h.msgRepo.ListByConversation(r.Context(), id)
 	if err != nil {
@@ -38,13 +55,12 @@ func (h *TitleHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to generate title")
 		return
 	}
-	// Trim quotes/whitespace
 	title = trimTitle(title)
 	if title == "" {
 		title = "New chat"
 	}
 
-	conv, err := h.convRepo.Update(r.Context(), id, db.UpdateConversationParams{Title: &title})
+	conv, err := h.convRepo.UpdateByUser(r.Context(), id, user.ID, db.UpdateConversationParams{Title: &title})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save title")
 		return
@@ -61,7 +77,6 @@ func trimTitle(s string) string {
 	for _, r := range s {
 		out = append(out, r)
 	}
-	// Trim leading/trailing spaces and quotes
 	start, end := 0, len(out)
 	for start < end && isTitleTrimChar(out[start]) {
 		start++

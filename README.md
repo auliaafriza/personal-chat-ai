@@ -1,16 +1,16 @@
-# PersonalGPT
+# Personal Chat AI by Aulia
 
 Chat assistant pribadi untuk dokumen, kode, dan produktivitas.
 Bagian dari [Roadmap AI Engineer](../) — proyek yang bertumbuh tiap minggu.
 
-**Status: Minggu 2 — Persistence & Multi-Conversation (Go BE)**
+**Status: Minggu 3 — Auth, Settings & Polish**
 
-Architecture: **Next.js FE** ←→ **Go BE** ←→ **Neon Postgres**
+Architecture: **Next.js FE (Auth.js v5)** ←→ **Go BE (JWT-protected)** ←→ **Neon Postgres**
 
 ```
 portofolio-ai-aulia/
-├── (frontend - Next.js 15 + TypeScript)
-└── backend/    (Go service — chi + pgx + golang-migrate, Anthropic via net/http)
+├── (frontend - Next.js 15 + TypeScript + Auth.js v5 + Google OAuth)
+└── backend/    (Go service — chi + pgx + golang-migrate + golang-jwt, Groq via net/http)
 ```
 
 ---
@@ -20,53 +20,76 @@ portofolio-ai-aulia/
 ### Frontend (this folder)
 - **Next.js 15** (App Router) + **TypeScript** strict
 - **Vercel AI SDK** (`@ai-sdk/react` untuk `useChat` hook + streaming)
+- **Auth.js v5** (NextAuth) — Google OAuth + HS256 JWT mint untuk BE
 - **TanStack Query v5** (singleton, di root)
-- **axios** (satu instance per backend service)
+- **axios** (satu instance per backend service, Bearer token via interceptor)
 - **Tailwind CSS** + **shadcn/ui** (Radix primitives)
 - **react-hook-form** + **zod** (schema-first forms)
 - **sonner** (toast)
+- **next-themes** (dark mode)
 - **Husky** + **commitlint** (Conventional Commits)
 
 ### Backend (`backend/`)
 - **Go 1.23** + **chi** router
 - **pgx** (native Postgres driver, no ORM magic)
 - **golang-migrate** (SQL migrations)
-- **Anthropic Messages API** via raw `net/http` + SSE parsing (streaming chat + Haiku title gen)
+- **golang-jwt/jwt/v5** — HS256 validation (shared `AUTH_SECRET` dengan FE)
+- **Groq Chat Completions API** (OpenAI-compatible) via raw `net/http` + SSE
 - Implements **Vercel AI SDK data stream protocol** sehingga FE pakai `useChat` tanpa perubahan
 
 Mengikuti [eDOT NextJS Coding Standards](https://docs.google.com/document/d/1yL8Y18aeYPcwqW1HnHO0BY7aiAhAqIpbLIREKU-tgCY/edit) yang diadaptasi (shadcn/ui menggantikan `@edot/sdk-ui-react`, BE Go terpisah biar "one axios instance per backend service" beneran).
 
 ## Quick Start
 
-Butuh **2 terminal** — satu untuk BE, satu untuk FE.
+Butuh **2 terminal** — satu untuk BE, satu untuk FE. Plus setup OAuth + shared secret sekali aja.
 
-### 1. Backend setup (sekali aja)
+### 1. Generate `AUTH_SECRET` (sekali aja)
+
+```bash
+openssl rand -hex 32
+# Copy output — paste ke FE .env.local DAN backend/.env (HARUS sama).
+```
+
+### 2. Google OAuth client (sekali aja)
+
+1. Buka [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials)
+2. **Create credentials → OAuth client ID**
+3. Application type: **Web application**
+4. Authorized redirect URI: `http://localhost:3000/api/auth/callback/google`
+5. Copy **Client ID** + **Client Secret** → paste ke FE `.env.local`
+
+### 3. Backend setup (sekali aja)
 
 ```bash
 cd backend
 cp .env.example .env
 # Edit .env — isi:
-#   ANTHROPIC_API_KEY (https://console.anthropic.com/settings/keys)
-#   DATABASE_URL     (Neon connection string — lihat "Database Setup" di bawah)
+#   GROQ_API_KEY    (https://console.groq.com/keys — free tier OK)
+#   DATABASE_URL    (Neon connection string — lihat "Database Setup" di bawah)
+#   AUTH_SECRET     (paste hasil openssl di atas)
 
 go mod download
 go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
-make migrate-up   # apply schema ke Neon
+make migrate-up   # apply 001_initial + 002_add_users ke Neon
 make run          # listen di :8080
 ```
 
-### 2. Frontend setup (di folder root, terminal lain)
+### 4. Frontend setup (di folder root, terminal lain)
 
 ```bash
 yarn install
 cp .env.example .env.local
-# Edit .env.local — defaultnya pointing ke http://localhost:8080
+# Edit .env.local — isi:
+#   NEXT_PUBLIC_API_BASE_URL  (default http://localhost:8080)
+#   AUTH_GOOGLE_ID            (dari Google Cloud Console)
+#   AUTH_GOOGLE_SECRET        (dari Google Cloud Console)
+#   AUTH_SECRET               (paste hasil openssl — sama dengan backend/.env)
 yarn setup:hooks  # init git + husky (sekali aja)
 yarn dev          # listen di :3000
 ```
 
-Buka [http://localhost:3000](http://localhost:3000) — auto-redirect ke `/chat`.
+Buka [http://localhost:3000](http://localhost:3000) → redirect ke `/signin` → sign in dengan Google → masuk `/chat`.
 
 ## Database Setup (Neon)
 
@@ -129,11 +152,15 @@ src/
 │   ├── not-found.tsx
 │   └── global-error.tsx
 ├── components/layout/
-│   ├── Sidebar.tsx                            # list + new chat button
+│   ├── Sidebar.tsx                            # list + new chat + user menu
+│   ├── MobileSidebar.tsx                      # Radix Dialog drawer (mobile only)
+│   ├── UserMenu.tsx                           # avatar dropdown — settings, theme, signout
+│   ├── ThemeToggle.tsx                        # next-themes light/dark button
 │   └── ConversationItem.tsx                   # rename/delete dropdown
 ├── features/chat/
 │   ├── pages/ChatPage.tsx                     # streaming + history + title gen
 │   ├── components/                            # ChatBubble, MessageList, ChatInput
+│   ├── hooks/useChatShortcuts.ts              # Cmd+K / Cmd+/ keyboard shortcuts
 │   ├── services/
 │   │   ├── query-keys.ts                      # typed const, never inline
 │   │   ├── conversation/
@@ -147,13 +174,28 @@ src/
 │   ├── types.ts                               # Zod schemas (form validation)
 │   ├── types/api.ts                           # type defs matching Go BE
 │   └── constants.ts                           # models, defaults
+├── features/settings/                         # Settings page (Minggu 3)
+│   ├── pages/SettingsPage.tsx
+│   ├── services/me/{get,put}.ts               # GET /me, PUT /me/settings
+│   ├── types.ts                               # Zod form schema
+│   ├── types/api.ts                           # User type
+│   └── constants.ts                           # AVAILABLE_MODELS, temperature bounds
+├── app/
+│   ├── signin/page.tsx                        # Google sign-in
+│   ├── api/auth/[...nextauth]/route.ts        # Auth.js handlers
+│   └── api/token/route.ts                     # Mint HS256 JWT untuk Go BE
 ├── lib/
 │   ├── utils.ts                               # cn() helper
 │   └── types.ts                               # ApiResponse envelope
 └── providers/
     ├── QueryProvider.tsx                      # TanStack Query (singleton)
+    ├── SessionProvider.tsx                    # next-auth/react SessionProvider
     └── ThemeProvider.tsx                      # next-themes
 ```
+
+Top-level (di luar `src/`):
+- `auth.ts` — Auth.js v5 NextAuth config (Google provider, jwt/session callbacks)
+- `middleware.ts` — protect routes; redirect ke `/signin` kalau no session
 
 ### Backend (`backend/`)
 
@@ -162,8 +204,8 @@ Lihat [backend/README.md](./backend/README.md) untuk struktur lengkap.
 ## Roadmap (12 Minggu)
 
 - [x] **Minggu 1** — Setup + streaming chat
-- [x] **Minggu 2** — Persistence (Go BE + Neon Postgres + Drizzle→pgx) + multi-conversation + auto-title ← **kamu di sini**
-- [ ] **Minggu 3** — Auth (Auth.js Google OAuth) + Settings page
+- [x] **Minggu 2** — Persistence (Go BE + Neon Postgres + pgx) + multi-conversation + auto-title
+- [x] **Minggu 3** — Auth (Auth.js v5 + Google OAuth + JWT shared secret) + Settings page + dark mode + Cmd+K/Cmd+/ + mobile responsive ← **kamu di sini**
 - [ ] **Minggu 4** — Embeddings + pgvector
 - [ ] **Minggu 5** — RAG end-to-end + citation
 - [ ] **Minggu 6** — Hybrid search + reranking
@@ -194,14 +236,43 @@ chore: bump pgx to v5.7.2
 - No `any`, no `console.log` (pakai `console.warn` / `console.error`)
 - Provider dengan error guard di hook (throw kalau dipakai di luar provider)
 
-## What's Next (Minggu 3 — Auth & Polish)
+## Auth Flow (Minggu 3)
 
-1. Add Auth.js (NextAuth) dengan Google OAuth di FE
-2. Add `users` table di BE migration + FK ke `user_id` di conversations
-3. JWT middleware di Go BE untuk validate session
-4. Settings page: pilih model, temperature slider, custom system prompt
-5. Keyboard shortcuts (Cmd+K untuk new chat, Cmd+/ untuk fokus input)
-6. Mobile responsive + dark mode toggle
+```
+Browser ──1. Sign in──▶ Auth.js v5 (FE) ──2. OAuth──▶ Google
+                              │
+                              │ 3. Profile (sub, email, name, picture)
+                              ▼
+                       FE /api/token
+                       (sign HS256 JWT pakai AUTH_SECRET)
+                              │
+                              │ 4. Bearer JWT
+                              ▼
+                       Go BE: middleware/auth.go
+                       (validate HS256 + upsert user + inject ke ctx)
+                              │
+                              ▼
+                       Handler (user-scoped queries)
+```
+
+Token lifetime 30 menit; FE auto-refresh on 401 (lihat `src/api/apiToken.ts`).
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Cmd/Ctrl + K` | New chat (atau focus input kalau lagi di `/chat`) |
+| `Cmd/Ctrl + /` | Focus input |
+| `Enter` | Kirim pesan |
+| `Shift + Enter` | Baris baru |
+
+## What's Next (Minggu 4 — Embeddings & pgvector)
+
+1. Tambah `pgvector` extension di Neon
+2. Migrate `documents`, `document_chunks` tables (chunk + embedding kolom)
+3. Document upload endpoint di Go BE
+4. Generate embeddings (Voyage / OpenAI / Cohere) saat upload
+5. Vector search via cosine similarity untuk RAG
 
 Detail lengkap di [Roadmap doc](https://docs.google.com/document/d/1yNJwtVLvIDWOd37nubd3-IQaeSPgBmbin-lANCMnh28/edit).
 

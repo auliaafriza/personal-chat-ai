@@ -1,22 +1,25 @@
 /**
  * Chat feature constants — single source of truth.
+ *
+ * Models: Groq (lihat backend/internal/service/anthropic.go). User settings
+ * default berasal dari /me endpoint — value di sini cuma fallback awal.
  */
 
-export const DEFAULT_MODEL = "claude-sonnet-4-6" as const
+export const DEFAULT_MODEL = "llama-3.3-70b-versatile" as const
 
 export const AVAILABLE_MODELS = [
-  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", description: "Best balance of speed & quality" },
-  { id: "claude-opus-4-6", label: "Claude Opus 4.6", description: "Highest quality, slower & pricier" },
-  { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", description: "Fastest, cheapest" },
+  { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B Versatile", description: "Default — balance of quality & speed" },
+  { id: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant", description: "Fastest, lowest-cost" },
+  { id: "mixtral-8x7b-32768", label: "Mixtral 8x7B", description: "32K context, bagus untuk dokumen panjang" },
 ] as const
 
 export const DEFAULT_SYSTEM_PROMPT =
-  "Kamu adalah PersonalGPT, asisten AI yang membantu user dengan jawaban jelas, terstruktur, dan jujur. " +
+  "Kamu adalah Personal Chat AI by Aulia, asisten AI yang membantu user dengan jawaban jelas, terstruktur, dan jujur. " +
   "Pakai format Markdown bila relevan (code blocks, lists, tables). " +
   "Kalau tidak tahu, bilang tidak tahu — jangan mengarang."
 
 export const MIN_TEMPERATURE = 0
-export const MAX_TEMPERATURE = 1
+export const MAX_TEMPERATURE = 2
 export const DEFAULT_TEMPERATURE = 0.7
 
 export const MAX_INPUT_LENGTH = 8000

@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/auliaafriza/personalgpt-backend/internal/db"
+	appmw "github.com/auliaafriza/personalgpt-backend/internal/middleware"
 	"github.com/auliaafriza/personalgpt-backend/internal/service"
 )
 
@@ -21,7 +22,12 @@ func NewConversationHandler(repo *db.ConversationRepo) *ConversationHandler {
 
 // GET /conversations
 func (h *ConversationHandler) List(w http.ResponseWriter, r *http.Request) {
-	convs, err := h.repo.List(r.Context(), 100)
+	user := appmw.UserFromCtx(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	convs, err := h.repo.ListByUser(r.Context(), user.ID, 100)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list conversations")
 		return
@@ -38,17 +44,41 @@ type createConversationBody struct {
 
 // POST /conversations
 func (h *ConversationHandler) Create(w http.ResponseWriter, r *http.Request) {
+	user := appmw.UserFromCtx(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var body createConversationBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		// Empty body is OK — use all defaults.
 		body = createConversationBody{}
 	}
 
+	// Pakai user settings sebagai default kalau request nggak override.
+	defaultModel := user.DefaultModel
+	if defaultModel == "" {
+		defaultModel = service.DefaultModel
+	}
+	defaultTemp := user.DefaultTemperature
+	if defaultTemp == 0 {
+		defaultTemp = 0.7
+	}
+	var sp *string
+	if body.SystemPrompt != nil {
+		sp = body.SystemPrompt
+	} else if user.SystemPrompt != "" {
+		s := user.SystemPrompt
+		sp = &s
+	}
+
 	params := db.CreateConversationParams{
+		UserID:       user.ID,
 		Title:        derefOr(body.Title, "New chat"),
-		Model:        derefOr(body.Model, service.DefaultModel),
-		SystemPrompt: body.SystemPrompt,
-		Temperature:  derefOr(body.Temperature, 0.7),
+		Model:        derefOr(body.Model, defaultModel),
+		SystemPrompt: sp,
+		Temperature:  derefOr(body.Temperature, defaultTemp),
 	}
 
 	conv, err := h.repo.Create(r.Context(), params)
@@ -61,8 +91,13 @@ func (h *ConversationHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // GET /conversations/{id}
 func (h *ConversationHandler) Get(w http.ResponseWriter, r *http.Request) {
+	user := appmw.UserFromCtx(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	id := chi.URLParam(r, "id")
-	conv, err := h.repo.Get(r.Context(), id)
+	conv, err := h.repo.GetByUser(r.Context(), id, user.ID)
 	if errors.Is(err, db.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "conversation not found")
 		return
@@ -83,6 +118,11 @@ type updateConversationBody struct {
 
 // PATCH /conversations/{id}
 func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
+	user := appmw.UserFromCtx(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	id := chi.URLParam(r, "id")
 
 	var body updateConversationBody
@@ -96,15 +136,12 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Model:       body.Model,
 		Temperature: body.Temperature,
 	}
-	// Distinguish "not set" from "explicit null" for system_prompt:
-	// FE sends `null` to clear, omit to leave as is. JSON decoder sets nil for both,
-	// so for now treat any `systemPrompt` key in body as "set" — caller can clear via empty string.
 	if body.SystemPrompt != nil {
 		sp := body.SystemPrompt
 		params.SystemPrompt = &sp
 	}
 
-	conv, err := h.repo.Update(r.Context(), id, params)
+	conv, err := h.repo.UpdateByUser(r.Context(), id, user.ID, params)
 	if errors.Is(err, db.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "conversation not found")
 		return
@@ -118,8 +155,13 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // DELETE /conversations/{id}
 func (h *ConversationHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	user := appmw.UserFromCtx(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	id := chi.URLParam(r, "id")
-	err := h.repo.Delete(r.Context(), id)
+	err := h.repo.DeleteByUser(r.Context(), id, user.ID)
 	if errors.Is(err, db.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "conversation not found")
 		return

@@ -23,7 +23,7 @@ export function MessageList({ messages, isStreaming }: MessageListProps) {
   if (messages.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
-        <h2 className="text-2xl font-semibold text-foreground">PersonalGPT</h2>
+        <h2 className="text-2xl font-semibold text-foreground">Personal Chat AI by Aulia</h2>
         <p className="text-sm">Mulai dengan tanya apa saja — kode, dokumen, atau ide.</p>
       </div>
     )

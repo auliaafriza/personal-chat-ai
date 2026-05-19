@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/auliaafriza/personalgpt-backend/internal/db"
+	appmw "github.com/auliaafriza/personalgpt-backend/internal/middleware"
 	"github.com/auliaafriza/personalgpt-backend/internal/service"
 	"github.com/auliaafriza/personalgpt-backend/internal/stream"
 )
@@ -35,6 +36,12 @@ type aiSdkMessage struct {
 
 // POST /chat — streaming endpoint. Implements Vercel AI SDK data stream protocol.
 func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
+	user := appmw.UserFromCtx(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
 	var body chatRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
@@ -47,28 +54,38 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Load conversation settings (fallback ke default kalau conversationId kosong)
-	model := service.DefaultModel
-	systemPrompt := service.DefaultSystemPrompt
-	temperature := 0.7
+	// Default ke user settings, lalu override pakai conversation settings (kalau ada).
+	model := user.DefaultModel
+	if model == "" || strings.HasPrefix(model, "claude-") {
+		model = service.DefaultModel
+	}
+	systemPrompt := user.SystemPrompt
+	if systemPrompt == "" {
+		systemPrompt = service.DefaultSystemPrompt
+	}
+	temperature := user.DefaultTemperature
+	if temperature == 0 {
+		temperature = 0.7
+	}
 
 	if body.ConversationID != "" {
-		conv, err := h.convRepo.Get(ctx, body.ConversationID)
+		conv, err := h.convRepo.GetByUser(ctx, body.ConversationID, user.ID)
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
 			writeError(w, http.StatusInternalServerError, "failed to load conversation")
 			return
 		}
-		if err == nil {
-			model = conv.Model
-			// Conversations created with old Anthropic model names won't work on Groq.
-			if strings.HasPrefix(model, "claude-") {
-				model = service.DefaultModel
-			}
-			if conv.SystemPrompt != nil && *conv.SystemPrompt != "" {
-				systemPrompt = *conv.SystemPrompt
-			}
-			temperature = conv.Temperature
+		if errors.Is(err, db.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "conversation not found")
+			return
 		}
+		model = conv.Model
+		if strings.HasPrefix(model, "claude-") {
+			model = service.DefaultModel
+		}
+		if conv.SystemPrompt != nil && *conv.SystemPrompt != "" {
+			systemPrompt = *conv.SystemPrompt
+		}
+		temperature = conv.Temperature
 	}
 
 	// Save user message (latest one) sebelum streaming, kalau ada conversationId
@@ -110,7 +127,6 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		log.Printf("[Chat] stream error: %v", err)
-		// Headers already sent; AI SDK protocol error frame already written.
 		return
 	}
 
@@ -123,7 +139,7 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}); err != nil {
 			log.Printf("[Chat] save assistant msg: %v", err)
 		}
-		if err := h.convRepo.Touch(ctx, body.ConversationID); err != nil {
+		if err := h.convRepo.TouchByUser(ctx, body.ConversationID, user.ID); err != nil {
 			log.Printf("[Chat] touch conversation: %v", err)
 		}
 	}

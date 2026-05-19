@@ -19,7 +19,7 @@ const (
 	DefaultModel        = "llama-3.3-70b-versatile"
 	TitleModel          = "llama-3.1-8b-instant"
 	DefaultMaxTokens    = 4096
-	DefaultSystemPrompt = "Kamu adalah PersonalGPT, asisten AI yang membantu user dengan jawaban jelas, " +
+	DefaultSystemPrompt = "Kamu adalah Personal Chat AI by Aulia, asisten AI yang membantu user dengan jawaban jelas, " +
 		"terstruktur, dan jujur. Pakai format Markdown bila relevan (code blocks, lists, tables). " +
 		"Kalau tidak tahu, bilang tidak tahu — jangan mengarang."
 )
@@ -119,11 +119,11 @@ func (g *Groq) Stream(ctx context.Context, req StreamRequest, sw *stream.Writer)
 	msgs := buildMessages(systemPrompt, req.Messages)
 
 	body := groqRequest{
-		Model:       model,
-		Messages:    msgs,
-		MaxTokens:   DefaultMaxTokens,
-		Temperature: req.Temperature,
-		Stream:      true,
+		Model:         model,
+		Messages:      msgs,
+		MaxTokens:     DefaultMaxTokens,
+		Temperature:   req.Temperature,
+		Stream:        true,
 		StreamOptions: &streamOpts{IncludeUsage: true},
 	}
 

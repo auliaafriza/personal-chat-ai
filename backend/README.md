@@ -1,27 +1,32 @@
-# PersonalGPT — Backend (Go)
+# PersonalChatAI-Aulia — Backend (Go)
 
-Go backend untuk PersonalGPT. Stack: **chi + pgx + golang-migrate**, Anthropic API via raw `net/http` + SSE (no SDK — alpha SDK API-nya masih sering berubah).
+Go backend untuk PersonalChatAI-Aulia. Stack: **chi + pgx + golang-migrate + golang-jwt**, Groq Chat Completions API via raw `net/http` + SSE.
 
 ## Endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| `GET`  | `/healthz` | Healthcheck |
-| `GET`  | `/conversations` | List conversations (sort by `updated_at` desc) |
-| `POST` | `/conversations` | Create new conversation |
-| `GET`  | `/conversations/{id}` | Get conversation detail |
-| `PATCH`| `/conversations/{id}` | Update (rename / change settings) |
-| `DELETE`| `/conversations/{id}` | Delete (cascade messages) |
-| `GET`  | `/conversations/{id}/messages` | List messages (sort by `created_at` asc) |
-| `POST` | `/conversations/{id}/title` | Auto-generate title pakai Claude Haiku |
-| `POST` | `/chat` | **Streaming endpoint** — Vercel AI SDK data stream protocol |
+Semua endpoint kecuali `/healthz` butuh `Authorization: Bearer <jwt>` header. JWT di-issue oleh FE Auth.js (`GET /api/token`) dan ditandatangani pakai HS256 menggunakan `AUTH_SECRET` yang sama dengan backend.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET`  | `/healthz` | No | Healthcheck |
+| `GET`  | `/me` | Yes | Current user + settings |
+| `PUT`  | `/me/settings` | Yes | Update default model / temperature / system prompt |
+| `GET`  | `/conversations` | Yes | List conversations (scoped per user, sort by `updated_at` desc) |
+| `POST` | `/conversations` | Yes | Create new conversation (pakai user settings sebagai default) |
+| `GET`  | `/conversations/{id}` | Yes | Get conversation detail |
+| `PATCH`| `/conversations/{id}` | Yes | Update (rename / change settings) |
+| `DELETE`| `/conversations/{id}` | Yes | Delete (cascade messages) |
+| `GET`  | `/conversations/{id}/messages` | Yes | List messages |
+| `POST` | `/conversations/{id}/title` | Yes | Auto-generate title pakai Llama 8B instant |
+| `POST` | `/chat` | Yes | **Streaming endpoint** — Vercel AI SDK data stream protocol |
 
 ## Setup
 
 ```bash
 cd backend
 cp .env.example .env
-# Edit .env — isi ANTHROPIC_API_KEY + DATABASE_URL (Neon connection string)
+# Edit .env — isi GROQ_API_KEY + DATABASE_URL + AUTH_SECRET
+# AUTH_SECRET harus identik dengan FE .env.local (generate: openssl rand -hex 32)
 
 go mod download
 go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
@@ -51,25 +56,30 @@ curl -X POST http://localhost:8080/conversations
 
 ```
 backend/
-├── cmd/server/main.go            # Entry point: chi router + graceful shutdown
+├── cmd/server/main.go            # Entry point: chi router + auth middleware + graceful shutdown
 ├── internal/
-│   ├── config/config.go          # Env loading + validation
+│   ├── config/config.go          # Env loading + validation (AUTH_SECRET ≥ 32 chars)
 │   ├── db/
 │   │   ├── pool.go               # pgx connection pool
-│   │   ├── models.go             # Conversation, Message structs
-│   │   ├── repo_conversation.go  # CRUD operations
+│   │   ├── models.go             # User, Conversation, Message structs
+│   │   ├── repo_user.go          # Upsert by google_sub + settings CRUD
+│   │   ├── repo_conversation.go  # User-scoped CRUD (ListByUser, GetByUser, ...)
 │   │   ├── repo_message.go
 │   │   └── migrations/
-│   │       └── 001_initial.{up,down}.sql
+│   │       ├── 001_initial.{up,down}.sql
+│   │       └── 002_add_users.{up,down}.sql
 │   ├── handler/                  # HTTP handlers (thin — call repo/service)
-│   │   ├── chat.go               # SSE streaming
+│   │   ├── chat.go               # SSE streaming (user-scoped)
 │   │   ├── conversation.go
 │   │   ├── message.go
 │   │   ├── title.go
+│   │   ├── me.go                 # GET /me + PUT /me/settings
 │   │   └── errors.go
 │   ├── service/
-│   │   └── anthropic.go          # Anthropic API client (net/http + SSE parsing)
-│   ├── middleware/logger.go
+│   │   └── anthropic.go          # Groq Chat Completions client (OpenAI-compatible SSE)
+│   ├── middleware/
+│   │   ├── logger.go
+│   │   └── auth.go               # HS256 JWT validate + user upsert + ctx injection
 │   └── stream/ai_sdk.go          # Vercel AI SDK data stream protocol writer
 ├── Makefile
 └── .env.example
@@ -151,4 +161,27 @@ Kalau pakai Postgres lokal (bukan Neon), ganti `sslmode=require` jadi `sslmode=d
 
 ---
 
-Part of [PersonalGPT](../README.md) — Roadmap AI Engineer Minggu 2.
+## Auth (Minggu 3)
+
+Middleware `internal/middleware/auth.go` validates a Bearer JWT (HS256) using `AUTH_SECRET`, upserts the user (keyed by Google `sub`), and stores `*db.User` di `r.Context()` via `appmw.UserFromCtx(ctx)`.
+
+Token shape (issued by FE `/api/token`):
+
+```json
+{
+  "sub":     "117823498023480923",   // Google's stable user id
+  "email":   "user@gmail.com",
+  "name":    "Aulia Afriza",
+  "picture": "https://lh3.googleusercontent.com/...",
+  "iat":     1715990400,
+  "exp":     1715992200               // 30 min lifetime
+}
+```
+
+Failure modes (all return 401):
+- Missing/malformed Authorization header
+- Invalid signature (mismatched AUTH_SECRET)
+- Expired token (FE auto-refreshes via `/api/token`)
+- Missing `sub` or `email` claims
+
+Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 3.

@@ -1,6 +1,6 @@
 "use client"
 
-import { type FormEvent, useEffect, useRef } from "react"
+import { forwardRef, type FormEvent, useEffect, useImperativeHandle, useRef } from "react"
 
 import { ArrowUp, Square } from "lucide-react"
 import { toast } from "sonner"
@@ -17,12 +17,16 @@ interface ChatInputProps {
   onStop: () => void
 }
 
-export function ChatInput({ input, isStreaming, onInputChange, onSubmit, onStop }: ChatInputProps) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(function ChatInput(
+  { input, isStreaming, onInputChange, onSubmit, onStop },
+  ref,
+) {
+  const localRef = useRef<HTMLTextAreaElement>(null)
+  useImperativeHandle(ref, () => localRef.current as HTMLTextAreaElement, [])
 
   // Auto-resize textarea up to 200px
   useEffect(() => {
-    const ta = textareaRef.current
+    const ta = localRef.current
     if (!ta) return
     ta.style.height = "auto"
     ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`
@@ -54,11 +58,11 @@ export function ChatInput({ input, isStreaming, onInputChange, onSubmit, onStop 
     >
       <div className="relative mx-auto flex max-w-3xl items-end gap-2">
         <textarea
-          ref={textareaRef}
+          ref={localRef}
           value={input}
           onChange={onInputChange}
           onKeyDown={handleKeyDown}
-          placeholder="Ketik pesan… (Enter untuk kirim, Shift+Enter untuk baris baru)"
+          placeholder="Ketik pesan… (Enter untuk kirim, Shift+Enter untuk baris baru, Cmd+/ untuk fokus)"
           rows={1}
           className={cn(
             "flex-1 resize-none rounded-2xl border border-input bg-background px-4 py-3 text-sm",
@@ -93,11 +97,11 @@ export function ChatInput({ input, isStreaming, onInputChange, onSubmit, onStop 
         )}
       </div>
       <div className="mx-auto mt-2 flex max-w-3xl justify-between text-xs text-muted-foreground">
-        <span>PersonalGPT bisa salah — verifikasi info penting.</span>
+        <span>Personal Chat AI by Aulia bisa salah — verifikasi info penting.</span>
         <span className={cn(isOverLimit && "text-destructive")}>
           {input.length} / {MAX_INPUT_LENGTH}
         </span>
       </div>
     </form>
   )
-}
+})

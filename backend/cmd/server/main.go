@@ -49,15 +49,20 @@ func run() error {
 	// Repositories
 	convRepo := db.NewConversationRepo(pool)
 	msgRepo := db.NewMessageRepo(pool)
+	userRepo := db.NewUserRepo(pool)
 
 	// Services
 	anthropicSvc := service.NewGroq(cfg.GroqAPIKey)
 
 	// Handlers
 	convH := handler.NewConversationHandler(convRepo)
-	msgH := handler.NewMessageHandler(msgRepo)
+	msgH := handler.NewMessageHandler(msgRepo, convRepo)
 	titleH := handler.NewTitleHandler(convRepo, msgRepo, anthropicSvc)
 	chatH := handler.NewChatHandler(convRepo, msgRepo, anthropicSvc)
+	meH := handler.NewMeHandler(userRepo)
+
+	// Middleware
+	authMw := appmw.Auth(cfg.AuthSecret, userRepo)
 
 	// Router
 	r := chi.NewRouter()
@@ -65,31 +70,43 @@ func run() error {
 	r.Use(appmw.Logger)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.CORSOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Content-Type", "Authorization"},
 		ExposedHeaders:   []string{"X-Vercel-Ai-Data-Stream"},
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
 
+	// Public route
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 
-	r.Route("/conversations", func(r chi.Router) {
-		r.Get("/", convH.List)
-		r.Post("/", convH.Create)
-		r.Route("/{id}", func(r chi.Router) {
-			r.Get("/", convH.Get)
-			r.Patch("/", convH.Update)
-			r.Delete("/", convH.Delete)
-			r.Get("/messages", msgH.List)
-			r.Post("/title", titleH.Generate)
-		})
-	})
+	// Protected routes (require valid JWT)
+	r.Group(func(r chi.Router) {
+		r.Use(authMw)
 
-	r.Post("/chat", chatH.Stream)
+		// Current user
+		r.Get("/me", meH.Get)
+		r.Put("/me/settings", meH.UpdateSettings)
+
+		// Conversations
+		r.Route("/conversations", func(r chi.Router) {
+			r.Get("/", convH.List)
+			r.Post("/", convH.Create)
+			r.Route("/{id}", func(r chi.Router) {
+				r.Get("/", convH.Get)
+				r.Patch("/", convH.Update)
+				r.Delete("/", convH.Delete)
+				r.Get("/messages", msgH.List)
+				r.Post("/title", titleH.Generate)
+			})
+		})
+
+		// Streaming chat
+		r.Post("/chat", chatH.Stream)
+	})
 
 	// HTTP server with graceful shutdown
 	srv := &http.Server{

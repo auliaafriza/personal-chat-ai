@@ -7,6 +7,7 @@ export type MessageRole = "user" | "assistant" | "system"
 
 export interface Conversation {
   id: string
+  userId?: string
   title: string
   model: string
   systemPrompt: string | null

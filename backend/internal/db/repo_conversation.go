@@ -21,6 +21,7 @@ func NewConversationRepo(pool *pgxpool.Pool) *ConversationRepo {
 }
 
 type CreateConversationParams struct {
+	UserID       string
 	Title        string
 	Model        string
 	SystemPrompt *string
@@ -30,24 +31,26 @@ type CreateConversationParams struct {
 func (r *ConversationRepo) Create(ctx context.Context, p CreateConversationParams) (Conversation, error) {
 	id := ulid.Make().String()
 	row := r.pool.QueryRow(ctx, `
-		INSERT INTO conversations (id, title, model, system_prompt, temperature)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, title, model, system_prompt, temperature, created_at, updated_at
-	`, id, p.Title, p.Model, p.SystemPrompt, p.Temperature)
+		INSERT INTO conversations (id, user_id, title, model, system_prompt, temperature)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, user_id, title, model, system_prompt, temperature, created_at, updated_at
+	`, id, p.UserID, p.Title, p.Model, p.SystemPrompt, p.Temperature)
 
 	return scanConversation(row)
 }
 
-func (r *ConversationRepo) List(ctx context.Context, limit int) ([]Conversation, error) {
+// ListByUser returns conversations scoped to a user, sorted by most recent.
+func (r *ConversationRepo) ListByUser(ctx context.Context, userID string, limit int) ([]Conversation, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, title, model, system_prompt, temperature, created_at, updated_at
+		SELECT id, user_id, title, model, system_prompt, temperature, created_at, updated_at
 		FROM conversations
+		WHERE user_id = $1
 		ORDER BY updated_at DESC
-		LIMIT $1
-	`, limit)
+		LIMIT $2
+	`, userID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -64,11 +67,13 @@ func (r *ConversationRepo) List(ctx context.Context, limit int) ([]Conversation,
 	return out, rows.Err()
 }
 
-func (r *ConversationRepo) Get(ctx context.Context, id string) (Conversation, error) {
+// GetByUser fetches a conversation iff it belongs to userID — otherwise ErrNotFound.
+// Treating wrong-owner as 404 (bukan 403) supaya nggak bocorin existence of resource.
+func (r *ConversationRepo) GetByUser(ctx context.Context, id, userID string) (Conversation, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, title, model, system_prompt, temperature, created_at, updated_at
-		FROM conversations WHERE id = $1
-	`, id)
+		SELECT id, user_id, title, model, system_prompt, temperature, created_at, updated_at
+		FROM conversations WHERE id = $1 AND user_id = $2
+	`, id, userID)
 	conv, err := scanConversation(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Conversation{}, ErrNotFound
@@ -83,18 +88,19 @@ type UpdateConversationParams struct {
 	Temperature  *float64
 }
 
-func (r *ConversationRepo) Update(ctx context.Context, id string, p UpdateConversationParams) (Conversation, error) {
+func (r *ConversationRepo) UpdateByUser(ctx context.Context, id, userID string, p UpdateConversationParams) (Conversation, error) {
 	row := r.pool.QueryRow(ctx, `
 		UPDATE conversations
-		SET title         = COALESCE($2, title),
-		    model         = COALESCE($3, model),
-		    system_prompt = CASE WHEN $4::boolean THEN $5 ELSE system_prompt END,
-		    temperature   = COALESCE($6, temperature),
-		    updated_at    = $7
-		WHERE id = $1
-		RETURNING id, title, model, system_prompt, temperature, created_at, updated_at
+		SET title         = COALESCE($3, title),
+		    model         = COALESCE($4, model),
+		    system_prompt = CASE WHEN $5::boolean THEN $6 ELSE system_prompt END,
+		    temperature   = COALESCE($7, temperature),
+		    updated_at    = $8
+		WHERE id = $1 AND user_id = $2
+		RETURNING id, user_id, title, model, system_prompt, temperature, created_at, updated_at
 	`,
 		id,
+		userID,
 		p.Title,
 		p.Model,
 		p.SystemPrompt != nil,
@@ -109,13 +115,19 @@ func (r *ConversationRepo) Update(ctx context.Context, id string, p UpdateConver
 	return conv, err
 }
 
-func (r *ConversationRepo) Touch(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, `UPDATE conversations SET updated_at = NOW() WHERE id = $1`, id)
-	return err
+func (r *ConversationRepo) TouchByUser(ctx context.Context, id, userID string) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE conversations SET updated_at = NOW() WHERE id = $1 AND user_id = $2`, id, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
-func (r *ConversationRepo) Delete(ctx context.Context, id string) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM conversations WHERE id = $1`, id)
+func (r *ConversationRepo) DeleteByUser(ctx context.Context, id, userID string) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM conversations WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
 		return err
 	}
@@ -132,7 +144,7 @@ type scanner interface {
 
 func scanConversation(row scanner) (Conversation, error) {
 	var c Conversation
-	err := row.Scan(&c.ID, &c.Title, &c.Model, &c.SystemPrompt, &c.Temperature, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.UserID, &c.Title, &c.Model, &c.SystemPrompt, &c.Temperature, &c.CreatedAt, &c.UpdatedAt)
 	return c, err
 }
 

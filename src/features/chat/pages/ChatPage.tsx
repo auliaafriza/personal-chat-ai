@@ -1,6 +1,6 @@
 "use client"
 
-import { type FormEvent, useEffect, useRef, useState } from "react"
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react"
 
 import { useChat } from "@ai-sdk/react"
 import type { Message as DbMessage } from "@/features/chat/types/api"
@@ -10,7 +10,10 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
 import { apiBaseURL } from "@/api/apiApp"
+import { getAuthToken } from "@/api/apiToken"
+import { MobileSidebar } from "@/components/layout/MobileSidebar"
 
+import { useChatShortcuts } from "../hooks/useChatShortcuts"
 import { useMutationCreateConversation } from "../services/conversation/post"
 import { useGetConversation } from "../services/conversation/detail/get"
 import { useGetMessages } from "../services/message/list/get"
@@ -32,6 +35,7 @@ function dbMessagesToAi(msgs: DbMessage[]): Message[] {
 
 export function ChatPage({ conversationId }: ChatPageProps) {
   const router = useRouter()
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   const { data: conversation } = useGetConversation(conversationId)
   const { data: initialMessages, isLoading: isLoadingMessages } = useGetMessages(conversationId)
@@ -41,6 +45,14 @@ export function ChatPage({ conversationId }: ChatPageProps) {
   const titleGeneratedRef = useRef(false)
 
   const [pendingInput, setPendingInput] = useState<string | null>(null)
+
+  // Custom fetch that attaches Bearer token — useChat() doesn't go through axios.
+  const fetchWithAuth = useCallback<typeof fetch>(async (input, init) => {
+    const token = await getAuthToken().catch(() => null)
+    const headers = new Headers(init?.headers)
+    if (token) headers.set("Authorization", `Bearer ${token}`)
+    return fetch(input, { ...init, headers })
+  }, [])
 
   const {
     messages,
@@ -55,12 +67,12 @@ export function ChatPage({ conversationId }: ChatPageProps) {
   } = useChat({
     api: `${apiBaseURL}/chat`,
     body: { conversationId },
+    fetch: fetchWithAuth,
     onError: (error) => {
       console.error("[Chat]", error)
       toast.error("Gagal mengirim pesan. Coba lagi.")
     },
     onFinish: () => {
-      // Trigger title generation setelah assistant balas pertama kali (2 messages total)
       if (conversationId && !titleGeneratedRef.current) {
         titleGeneratedRef.current = true
         titleMutation.mutate(conversationId)
@@ -72,7 +84,6 @@ export function ChatPage({ conversationId }: ChatPageProps) {
   useEffect(() => {
     if (initialMessages) {
       setMessages(dbMessagesToAi(initialMessages))
-      // Already has assistant message → skip title generation
       titleGeneratedRef.current = initialMessages.some((m) => m.role === "assistant")
     } else if (!conversationId) {
       setMessages([])
@@ -89,13 +100,27 @@ export function ChatPage({ conversationId }: ChatPageProps) {
     }
   }, [pendingInput, conversationId, append])
 
+  // Keyboard shortcuts
+  const handleNewChat = useCallback(() => {
+    if (!conversationId) {
+      inputRef.current?.focus()
+      return
+    }
+    router.push("/chat")
+  }, [conversationId, router])
+
+  const handleFocusInput = useCallback(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  useChatShortcuts({ onNewChat: handleNewChat, onFocusInput: handleFocusInput })
+
   const handleFormSubmit = (e?: FormEvent<HTMLFormElement>) => {
     e?.preventDefault()
     const trimmed = input.trim()
     if (!trimmed) return
 
     if (!conversationId) {
-      // Belum ada conversation — buat baru, simpan input, redirect
       const text = trimmed
       setInput("")
       setPendingInput(text)
@@ -104,7 +129,6 @@ export function ChatPage({ conversationId }: ChatPageProps) {
         {
           onSuccess: (conv) => router.push(`/chat/${conv.id}`),
           onError: () => {
-            // Restore input kalau gagal
             setPendingInput(null)
             setInput(text)
           },
@@ -113,7 +137,6 @@ export function ChatPage({ conversationId }: ChatPageProps) {
       return
     }
 
-    // Conversation sudah ada — submit normally
     handleSubmit(e)
   }
 
@@ -122,10 +145,11 @@ export function ChatPage({ conversationId }: ChatPageProps) {
 
   return (
     <main className="flex h-dvh flex-col bg-background">
-      <header className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div>
+      <header className="flex items-center gap-3 border-b border-border px-4 py-3">
+        <MobileSidebar />
+        <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold">{conversation?.title ?? "New chat"}</h1>
-          <p className="text-xs text-muted-foreground">{conversation?.model ?? "claude-sonnet-4-6"}</p>
+          <p className="truncate text-xs text-muted-foreground">{conversation?.model ?? "llama-3.3-70b-versatile"}</p>
         </div>
       </header>
 
@@ -140,6 +164,7 @@ export function ChatPage({ conversationId }: ChatPageProps) {
       </div>
 
       <ChatInput
+        ref={inputRef}
         input={input}
         isStreaming={isStreaming || createMutation.isPending}
         onInputChange={handleInputChange}
