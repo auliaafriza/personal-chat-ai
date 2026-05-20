@@ -9,12 +9,13 @@ import (
 )
 
 type Config struct {
-	Port        string
-	Env         string
-	DatabaseURL string
-	GroqAPIKey  string
-	AuthSecret  string
-	CORSOrigins []string
+	Port          string
+	Env           string
+	DatabaseURL   string
+	GroqAPIKey    string
+	VoyageAPIKey  string
+	AuthSecret    string
+	CORSOrigins   []string
 }
 
 func Load() (*Config, error) {
@@ -22,12 +23,13 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		Port:        getEnv("PORT", "8080"),
-		Env:         getEnv("ENV", "development"),
-		DatabaseURL: os.Getenv("DATABASE_URL"),
-		GroqAPIKey:  os.Getenv("GROQ_API_KEY"),
-		AuthSecret:  os.Getenv("AUTH_SECRET"),
-		CORSOrigins: parseOrigins(getEnv("CORS_ORIGINS", "http://localhost:3000")),
+		Port:         getEnv("PORT", "8080"),
+		Env:          getEnv("ENV", "development"),
+		DatabaseURL:  os.Getenv("DATABASE_URL"),
+		GroqAPIKey:   os.Getenv("GROQ_API_KEY"),
+		VoyageAPIKey: os.Getenv("VOYAGE_API_KEY"),
+		AuthSecret:   os.Getenv("AUTH_SECRET"),
+		CORSOrigins:  parseOrigins(getEnv("CORS_ORIGINS", "http://localhost:3000")),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -35,6 +37,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.GroqAPIKey == "" {
 		return nil, fmt.Errorf("missing env: GROQ_API_KEY")
+	}
+	if cfg.VoyageAPIKey == "" {
+		return nil, fmt.Errorf("missing env: VOYAGE_API_KEY (get free key at https://www.voyageai.com)")
 	}
 	if cfg.AuthSecret == "" {
 		return nil, fmt.Errorf("missing env: AUTH_SECRET (must match frontend AUTH_SECRET)")

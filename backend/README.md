@@ -1,6 +1,6 @@
 # PersonalChatAI-Aulia — Backend (Go)
 
-Go backend untuk PersonalChatAI-Aulia. Stack: **chi + pgx + golang-migrate + golang-jwt**, Groq Chat Completions API via raw `net/http` + SSE.
+Go backend untuk PersonalChatAI-Aulia. Stack: **chi + pgx + pgvector + golang-migrate + golang-jwt**, Groq (chat) + Voyage AI (embeddings) via raw `net/http` + SSE.
 
 ## Endpoints
 
@@ -19,19 +19,24 @@ Semua endpoint kecuali `/healthz` butuh `Authorization: Bearer <jwt>` header. JW
 | `GET`  | `/conversations/{id}/messages` | Yes | List messages |
 | `POST` | `/conversations/{id}/title` | Yes | Auto-generate title pakai Llama 8B instant |
 | `POST` | `/chat` | Yes | **Streaming endpoint** — Vercel AI SDK data stream protocol |
+| `GET`  | `/documents` | Yes | List user's documents (Minggu 4) |
+| `POST` | `/documents` | Yes | Upload file or paste text → parse + chunk + embed |
+| `GET`  | `/documents/{id}` | Yes | Document detail + all chunks |
+| `DELETE`| `/documents/{id}` | Yes | Cascade delete document + chunks |
+| `POST` | `/documents/search` | Yes | Cosine similarity search across all user's chunks |
 
 ## Setup
 
 ```bash
 cd backend
 cp .env.example .env
-# Edit .env — isi GROQ_API_KEY + DATABASE_URL + AUTH_SECRET
+# Edit .env — isi GROQ_API_KEY + VOYAGE_API_KEY + DATABASE_URL + AUTH_SECRET
 # AUTH_SECRET harus identik dengan FE .env.local (generate: openssl rand -hex 32)
 
 go mod download
 go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
-# Migrate
+# Migrate (001 + 002 + 003)
 make migrate-up
 
 # Run
@@ -61,22 +66,28 @@ backend/
 │   ├── config/config.go          # Env loading + validation (AUTH_SECRET ≥ 32 chars)
 │   ├── db/
 │   │   ├── pool.go               # pgx connection pool
-│   │   ├── models.go             # User, Conversation, Message structs
+│   │   ├── models.go             # User, Conversation, Message, Document, DocumentChunk
 │   │   ├── repo_user.go          # Upsert by google_sub + settings CRUD
-│   │   ├── repo_conversation.go  # User-scoped CRUD (ListByUser, GetByUser, ...)
+│   │   ├── repo_conversation.go  # User-scoped CRUD
 │   │   ├── repo_message.go
+│   │   ├── repo_document.go      # CreateWithChunks (tx) + SearchSimilar (cosine)
 │   │   └── migrations/
 │   │       ├── 001_initial.{up,down}.sql
-│   │       └── 002_add_users.{up,down}.sql
+│   │       ├── 002_add_users.{up,down}.sql
+│   │       └── 003_add_documents.{up,down}.sql      # pgvector + HNSW index
 │   ├── handler/                  # HTTP handlers (thin — call repo/service)
 │   │   ├── chat.go               # SSE streaming (user-scoped)
 │   │   ├── conversation.go
 │   │   ├── message.go
 │   │   ├── title.go
 │   │   ├── me.go                 # GET /me + PUT /me/settings
+│   │   ├── document.go           # Upload + List + Search (Minggu 4)
 │   │   └── errors.go
 │   ├── service/
-│   │   └── anthropic.go          # Groq Chat Completions client (OpenAI-compatible SSE)
+│   │   ├── anthropic.go          # Groq Chat Completions client (OpenAI-compatible SSE)
+│   │   ├── embeddings.go         # Voyage AI client (voyage-3-lite, 512 dim)
+│   │   ├── parser.go             # txt/md/pdf/docx → plain text
+│   │   └── chunker.go            # Heading-aware + fallback fixed-size chunking
 │   ├── middleware/
 │   │   ├── logger.go
 │   │   └── auth.go               # HS256 JWT validate + user upsert + ctx injection
@@ -184,4 +195,4 @@ Failure modes (all return 401):
 - Expired token (FE auto-refreshes via `/api/token`)
 - Missing `sub` or `email` claims
 
-Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 3.
+Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 4.

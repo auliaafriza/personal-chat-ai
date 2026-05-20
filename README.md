@@ -3,12 +3,14 @@
 Chat assistant pribadi untuk dokumen, kode, dan produktivitas.
 Bagian dari [Roadmap AI Engineer](../) — proyek yang bertumbuh tiap minggu.
 
-Architecture: **Next.js FE (Auth.js v5)** ←→ **Go BE (JWT-protected)** ←→ **Neon Postgres**
+**Status: Minggu 4 — Embeddings & pgvector**
+
+Architecture: **Next.js FE (Auth.js v5)** ←→ **Go BE (JWT-protected)** ←→ **Neon Postgres (pgvector)**
 
 ```
 portofolio-ai-aulia/
 ├── (frontend - Next.js 15 + TypeScript + Auth.js v5 + Google OAuth)
-└── backend/    (Go service — chi + pgx + golang-migrate + golang-jwt, Groq via net/http)
+└── backend/    (Go service — chi + pgx + pgvector + golang-jwt, Groq + Voyage AI via net/http)
 ```
 
 ---
@@ -30,9 +32,13 @@ portofolio-ai-aulia/
 ### Backend (`backend/`)
 - **Go 1.23** + **chi** router
 - **pgx** (native Postgres driver, no ORM magic)
+- **pgvector** (Neon extension) — vector(512) + HNSW cosine index
 - **golang-migrate** (SQL migrations)
 - **golang-jwt/jwt/v5** — HS256 validation (shared `AUTH_SECRET` dengan FE)
-- **Groq Chat Completions API** (OpenAI-compatible) via raw `net/http` + SSE
+- **Groq Chat Completions API** (OpenAI-compatible) via raw `net/http` + SSE — chat
+- **Voyage AI** (voyage-3-lite, 512 dim) via raw `net/http` — embeddings (free 200M tokens/bulan)
+- **ledongthuc/pdf** — PDF text extraction (pure Go, no CGO)
+- DOCX parsing via stdlib `archive/zip` + `encoding/xml` (no extra dep)
 - Implements **Vercel AI SDK data stream protocol** sehingga FE pakai `useChat` tanpa perubahan
 
 Mengikuti yang diadaptasi (shadcn/ui menggantikan `@edot/sdk-ui-react`, BE Go terpisah biar "one axios instance per backend service" beneran).
@@ -62,14 +68,15 @@ openssl rand -hex 32
 cd backend
 cp .env.example .env
 # Edit .env — isi:
-#   GROQ_API_KEY    (https://console.groq.com/keys — free tier OK)
-#   DATABASE_URL    (Neon connection string — lihat "Database Setup" di bawah)
-#   AUTH_SECRET     (paste hasil openssl di atas)
+#   GROQ_API_KEY     (https://console.groq.com/keys — free)
+#   VOYAGE_API_KEY   (https://www.voyageai.com — free 200M tokens/bulan)
+#   DATABASE_URL     (Neon connection string — lihat "Database Setup" di bawah)
+#   AUTH_SECRET      (paste hasil openssl di atas)
 
 go mod download
 go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
-make migrate-up   # apply 001_initial + 002_add_users ke Neon
+make migrate-up   # apply 001 + 002 + 003 (pgvector + documents) ke Neon
 make run          # listen di :8080
 ```
 
@@ -178,6 +185,13 @@ src/
 │   ├── types.ts                               # Zod form schema
 │   ├── types/api.ts                           # User type
 │   └── constants.ts                           # AVAILABLE_MODELS, temperature bounds
+├── features/documents/                        # Documents page (Minggu 4)
+│   ├── pages/DocumentsPage.tsx
+│   ├── components/{UploadCard,DocumentList,SearchTool}.tsx
+│   ├── services/{list/get,detail/get,post,delete,search/post}.ts
+│   ├── types.ts                               # Zod form schemas
+│   ├── types/api.ts                           # Document, DocumentChunk, SearchResult
+│   └── constants.ts                           # Accepted formats, max size, topK bounds
 ├── app/
 │   ├── signin/page.tsx                        # Google sign-in
 │   ├── api/auth/[...nextauth]/route.ts        # Auth.js handlers
@@ -203,8 +217,8 @@ Lihat [backend/README.md](./backend/README.md) untuk struktur lengkap.
 
 - [x] **Minggu 1** — Setup + streaming chat
 - [x] **Minggu 2** — Persistence (Go BE + Neon Postgres + pgx) + multi-conversation + auto-title
-- [x] **Minggu 3** — Auth (Auth.js v5 + Google OAuth + JWT shared secret) + Settings page + dark mode + Cmd+K/Cmd+/ + mobile responsive ← **kamu di sini**
-- [ ] **Minggu 4** — Embeddings + pgvector
+- [x] **Minggu 3** — Auth (Auth.js v5 + Google OAuth + JWT shared secret) + Settings page + dark mode + Cmd+K/Cmd+/ + mobile responsive
+- [x] **Minggu 4** — Embeddings (Voyage AI voyage-3-lite, 512 dim) + pgvector + document upload (txt/md/pdf/docx + paste) + similarity search UI ← **kamu di sini**
 - [ ] **Minggu 5** — RAG end-to-end + citation
 - [ ] **Minggu 6** — Hybrid search + reranking
 - [ ] **Minggu 7** — Tool calling (web search, fetch URL)
@@ -264,13 +278,55 @@ Token lifetime 30 menit; FE auto-refresh on 401 (lihat `src/api/apiToken.ts`).
 | `Enter` | Kirim pesan |
 | `Shift + Enter` | Baris baru |
 
-## What's Next (Minggu 4 — Embeddings & pgvector)
+## Embeddings & RAG Setup (Minggu 4)
 
-1. Tambah `pgvector` extension di Neon
-2. Migrate `documents`, `document_chunks` tables (chunk + embedding kolom)
-3. Document upload endpoint di Go BE
-4. Generate embeddings (Voyage / OpenAI / Cohere) saat upload
-5. Vector search via cosine similarity untuk RAG
+### Voyage AI
+
+1. Daftar di [voyageai.com](https://www.voyageai.com) → no credit card required.
+2. Dashboard → **API Keys** → create key → paste ke `backend/.env` sebagai `VOYAGE_API_KEY=pa-...`
+3. Free tier: 200M tokens/bulan untuk `voyage-3-lite`. Setiap chunk ~250-500 tokens, jadi 200M tokens ≈ 500k+ chunks. Praktis nggak akan habis untuk personal use.
+
+### pgvector
+
+Neon free tier auto-include pgvector extension. Migration `003_add_documents.up.sql` jalanin:
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+Kalau pakai Postgres lokal, install dulu via [pgvector repo](https://github.com/pgvector/pgvector). Mac:
+```bash
+brew install pgvector
+```
+
+### Document flow
+
+```
+File upload (.txt|.md|.pdf|.docx) atau paste text
+  ↓ service.Parse  (dispatch by extension)
+Plain text
+  ↓ service.Chunk  (heading-aware + fallback fixed-size 1500 chars, 100 overlap)
+[]Chunk
+  ↓ Voyage AI POST /v1/embeddings  (input_type=document, batched 128)
+[][]float32  (512-dim per chunk)
+  ↓ tx: INSERT documents + batch INSERT document_chunks (embedding::vector)
+Neon pgvector
+```
+
+Search:
+```
+Query text
+  ↓ Voyage AI  (input_type=query)
+[]float32
+  ↓ ORDER BY embedding <=> $query_vec ASC LIMIT topK   (HNSW index, cosine distance)
+[]SearchResult  (chunk + documentTitle + similarity)
+```
+
+## What's Next (Minggu 5 — RAG end-to-end + citation)
+
+1. Auto-RAG di chat: kalau ada dokumen, retrieve top-k chunks dari query → inject ke system prompt → cite di response
+2. Per-conversation document binding (atau global search semua docs user)
+3. Citation rendering di FE — clickable link ke chunk source
+4. Streaming + tool-style "retrieving 3 chunks…" indicator
 
 Detail lengkap di [Roadmap doc](https://docs.google.com/document/d/1yNJwtVLvIDWOd37nubd3-IQaeSPgBmbin-lANCMnh28/edit).
 

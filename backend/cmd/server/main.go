@@ -50,9 +50,11 @@ func run() error {
 	convRepo := db.NewConversationRepo(pool)
 	msgRepo := db.NewMessageRepo(pool)
 	userRepo := db.NewUserRepo(pool)
+	docRepo := db.NewDocumentRepo(pool)
 
 	// Services
 	anthropicSvc := service.NewGroq(cfg.GroqAPIKey)
+	embedder := service.NewEmbedder(cfg.VoyageAPIKey)
 
 	// Handlers
 	convH := handler.NewConversationHandler(convRepo)
@@ -60,6 +62,7 @@ func run() error {
 	titleH := handler.NewTitleHandler(convRepo, msgRepo, anthropicSvc)
 	chatH := handler.NewChatHandler(convRepo, msgRepo, anthropicSvc)
 	meH := handler.NewMeHandler(userRepo)
+	docH := handler.NewDocumentHandler(docRepo, embedder)
 
 	// Middleware
 	authMw := appmw.Auth(cfg.AuthSecret, userRepo)
@@ -106,6 +109,17 @@ func run() error {
 
 		// Streaming chat
 		r.Post("/chat", chatH.Stream)
+
+		// Documents (Minggu 4)
+		r.Route("/documents", func(r chi.Router) {
+			r.Get("/", docH.List)
+			r.Post("/", docH.Upload)
+			r.Post("/search", docH.Search)
+			r.Route("/{id}", func(r chi.Router) {
+				r.Get("/", docH.Get)
+				r.Delete("/", docH.Delete)
+			})
+		})
 	})
 
 	// HTTP server with graceful shutdown
