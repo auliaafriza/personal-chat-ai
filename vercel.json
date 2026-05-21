@@ -1,12 +1,4 @@
 {
-    "experimentalServices": {
-        "frontend": {
-            "routePrefix": "/",
-            "framework": "nextjs"
-        },
-        "backend": {
-            "entrypoint": "backend",
-            "routePrefix": "/_/backend"
-        }
-    }
+  "buildCommand": "yarn build",
+  "installCommand": "yarn install --frozen-lockfile"
 }
