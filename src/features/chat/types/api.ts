@@ -16,10 +16,26 @@ export interface Conversation {
   updatedAt: string
 }
 
+export interface Source {
+  index: number // 1-based, match marker [n] di teks
+  documentId: string
+  documentTitle: string
+  heading: string
+  snippet: string
+  similarity: number
+}
+
 export interface Message {
   id: string
   conversationId: string
   role: MessageRole
   content: string
+  sources?: Source[] // RAG citations (assistant message saja)
   createdAt: string
+}
+
+// Bentuk annotation yang dikirim BE via AI SDK frame `8:` (lihat stream/ai_sdk.go).
+export interface SourcesAnnotation {
+  type: "sources"
+  sources: Source[]
 }

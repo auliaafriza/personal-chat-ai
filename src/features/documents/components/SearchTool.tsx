@@ -20,14 +20,16 @@ export function SearchTool() {
     searchMutation.mutate({ query: trimmed, topK })
   }
 
-  const results = searchMutation.data?.results ?? []
+  const data = searchMutation.data
+  const results = data?.results ?? []
 
   return (
     <section className="space-y-3 rounded-lg border border-border bg-card p-4">
       <div>
         <h2 className="text-sm font-medium">Similarity search</h2>
         <p className="text-xs text-muted-foreground">
-          Test embedding: input query → top-k chunk paling mirip (cosine similarity).
+          Pipeline: <span className="font-mono">vector top-20 + BM25 top-20 → RRF → rerank top-K</span>{" "}
+          (Voyage rerank-2). Test embedding quality di sini.
         </p>
       </div>
 
@@ -63,28 +65,53 @@ export function SearchTool() {
         </div>
       </form>
 
-      {searchMutation.data ? (
+      {data ? (
         results.length === 0 ? (
           <div className="rounded-md border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
             Nggak ada chunk yang relevan. Upload dokumen dulu, atau coba query lain.
           </div>
         ) : (
-          <ol className="space-y-2">
-            {results.map((r, i) => (
-              <li key={r.id} className="rounded-md border border-border p-3">
-                <div className="flex items-baseline justify-between gap-2">
-                  <p className="truncate text-xs font-medium text-muted-foreground">
-                    #{i + 1} · {r.documentTitle}
-                    {r.heading ? ` · ${r.heading}` : ""}
-                  </p>
-                  <span className="shrink-0 rounded-full bg-accent px-2 py-0.5 font-mono text-xs">
-                    {(r.similarity * 100).toFixed(1)}%
-                  </span>
-                </div>
-                <p className="mt-1 whitespace-pre-wrap text-sm">{r.content}</p>
-              </li>
-            ))}
-          </ol>
+          <>
+            {data.reranked ? (
+              <p className="text-[11px] text-muted-foreground">
+                Skor utama = <span className="font-mono">rerankScore</span>. Hover badge untuk lihat breakdown
+                vector + BM25 + RRF.
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                Rerank di-skip — skor utama = <span className="font-mono">rrfScore</span>.
+              </p>
+            )}
+            <ol className="space-y-2">
+              {results.map((r, i) => {
+                const breakdownTitle = [
+                  r.vectorScore !== undefined ? `vector: ${r.vectorScore.toFixed(3)}` : null,
+                  r.bm25Score !== undefined ? `bm25: ${r.bm25Score.toFixed(3)}` : null,
+                  r.rrfScore !== undefined ? `rrf: ${r.rrfScore.toFixed(4)}` : null,
+                  r.rerankScore !== undefined ? `rerank: ${r.rerankScore.toFixed(3)}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+                return (
+                  <li key={r.id} className="rounded-md border border-border p-3">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <p className="truncate text-xs font-medium text-muted-foreground">
+                        #{i + 1} · {r.documentTitle}
+                        {r.heading ? ` · ${r.heading}` : ""}
+                      </p>
+                      <span
+                        className="shrink-0 rounded-full bg-accent px-2 py-0.5 font-mono text-xs"
+                        title={breakdownTitle}
+                      >
+                        {(r.similarity * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                    <p className="mt-1 whitespace-pre-wrap text-sm">{r.content}</p>
+                  </li>
+                )
+              })}
+            </ol>
+          </>
         )
       ) : null}
     </section>

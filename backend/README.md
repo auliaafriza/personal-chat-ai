@@ -18,7 +18,7 @@ Semua endpoint kecuali `/healthz` butuh `Authorization: Bearer <jwt>` header. JW
 | `DELETE`| `/conversations/{id}` | Yes | Delete (cascade messages) |
 | `GET`  | `/conversations/{id}/messages` | Yes | List messages |
 | `POST` | `/conversations/{id}/title` | Yes | Auto-generate title pakai Llama 8B instant |
-| `POST` | `/chat` | Yes | **Streaming endpoint** — Vercel AI SDK data stream protocol |
+| `POST` | `/chat` | Yes | **Streaming endpoint** — Vercel AI SDK data stream protocol + auto-RAG (Minggu 5) |
 | `GET`  | `/documents` | Yes | List user's documents (Minggu 4) |
 | `POST` | `/documents` | Yes | Upload file or paste text → parse + chunk + embed |
 | `GET`  | `/documents/{id}` | Yes | Document detail + all chunks |
@@ -74,7 +74,9 @@ backend/
 │   │   └── migrations/
 │   │       ├── 001_initial.{up,down}.sql
 │   │       ├── 002_add_users.{up,down}.sql
-│   │       └── 003_add_documents.{up,down}.sql      # pgvector + HNSW index
+│   │       ├── 003_add_documents.{up,down}.sql      # pgvector + HNSW index
+│   │       ├── 004_add_message_sources.{up,down}.sql # JSONB sources (citation persist)
+│   │       └── 005_add_tsvector.{up,down}.sql        # tsvector + GIN index (Minggu 6 hybrid)
 │   ├── handler/                  # HTTP handlers (thin — call repo/service)
 │   │   ├── chat.go               # SSE streaming (user-scoped)
 │   │   ├── conversation.go
@@ -86,6 +88,8 @@ backend/
 │   ├── service/
 │   │   ├── anthropic.go          # Groq Chat Completions client (OpenAI-compatible SSE)
 │   │   ├── embeddings.go         # Voyage AI client (voyage-3-lite, 512 dim)
+│   │   ├── rerank.go             # Voyage rerank-2 client (cross-encoder, Minggu 6)
+│   │   ├── retriever.go          # Orchestrator: embed → hybrid → rerank (Minggu 6)
 │   │   ├── parser.go             # txt/md/pdf/docx → plain text
 │   │   └── chunker.go            # Heading-aware + fallback fixed-size chunking
 │   ├── middleware/
@@ -195,4 +199,55 @@ Failure modes (all return 401):
 - Expired token (FE auto-refreshes via `/api/token`)
 - Missing `sub` or `email` claims
 
-Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 4.
+## RAG (Minggu 5)
+
+Auto-RAG di `POST /chat` (lihat `internal/handler/chat.go`). Aktif kalau user punya ≥1 chunk:
+
+1. Ambil pesan user terakhir → embed via Voyage (`input_type=query`).
+2. `SearchSimilar` top-5 (cosine, HNSW index).
+3. Filter `similarity ≥ 0.30` (anti-noise untuk chit-chat).
+4. Build context block `[n] (Judul — Heading)\n{chunk}` → append ke system prompt + instruksi citation.
+5. Kirim `sources` via AI SDK annotation frame `8:[{type:"sources",sources:[...]}]` SEBELUM text.
+6. Stream response LLM (Groq) dengan inline `[n]` markers.
+7. Persist assistant message + `sources` (JSONB) → citation survive reload.
+
+Source shape (annotation + `messages.sources`):
+
+```json
+{
+  "index": 1,
+  "documentId": "01HXXX...",
+  "documentTitle": "Knowledge Base: Embeddings",
+  "heading": "2. Cara Kerja pgvector",
+  "snippet": "pgvector adalah extension Postgres…",
+  "similarity": 0.72
+}
+```
+
+Graceful degradation: kalau embedding/search gagal di mana pun, chat tetap jalan tanpa RAG (sources kosong, no citation).
+
+## Hybrid Search + Rerank (Minggu 6)
+
+Pipeline `service.Retriever` (lihat `internal/service/retriever.go`):
+
+1. **Embed query** — Voyage `voyage-3-lite`, `input_type=query`
+2. **Hybrid search** (`db.SearchHybrid`) — single SQL:
+   - Vector top-20 via `<=>` (cosine, HNSW index `chunks_embedding_idx`)
+   - BM25 top-20 via `ts_rank(content_tsv, websearch_to_tsquery('simple', $query))` (GIN index `chunks_content_tsv_idx`)
+   - RRF combine: `score = Σ 1 / (60 + rank_i)`
+   - FULL OUTER JOIN → preserve chunks yang cuma muncul di salah satu retriever
+3. **Rerank** — Voyage `rerank-2` cross-encoder, top-K final
+4. **Fallback** — kalau rerank gagal, return RRF results as-is (graceful degradation)
+
+Dipakai oleh:
+- `POST /chat` (chat handler RAG, threshold `rerankScore >= 0.10`)
+- `POST /documents/search` (search UI; user bisa skip rerank dengan `noRerank: true` di body)
+
+Tuning (`internal/handler/chat.go`):
+```go
+ragCandidateLimit      = 20   // per-retriever top-N untuk hybrid stage
+ragTopK                = 5    // final top-K setelah rerank
+ragSimilarityThreshold = 0.10 // rerank score di bawah ini = nggak relevan
+```
+
+Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 6.

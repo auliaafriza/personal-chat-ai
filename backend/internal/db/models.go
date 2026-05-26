@@ -41,7 +41,19 @@ type Message struct {
 	ConversationID string      `json:"conversationId"`
 	Role           MessageRole `json:"role"`
 	Content        string      `json:"content"`
+	Sources        []Source    `json:"sources,omitempty"` // RAG citations (assistant msg saja)
 	CreatedAt      time.Time   `json:"createdAt"`
+}
+
+// Source — referensi chunk yang dipakai untuk grounding sebuah assistant message.
+// Di-embed di message.annotations (live) + persisted di messages.sources JSONB.
+type Source struct {
+	Index         int     `json:"index"` // 1-based, match marker [n] di teks
+	DocumentID    string  `json:"documentId"`
+	DocumentTitle string  `json:"documentTitle"`
+	Heading       string  `json:"heading"`
+	Snippet       string  `json:"snippet"`
+	Similarity    float64 `json:"similarity"`
 }
 
 // Document — file/text yang user upload buat di-embed (Minggu 4).
@@ -68,9 +80,20 @@ type DocumentChunk struct {
 	CreatedAt  time.Time `json:"createdAt"`
 }
 
-// SearchResult — DocumentChunk + similarity score (cosine distance → similarity).
+// SearchResult — DocumentChunk + scoring breakdown.
+//
+// Field-field scoring (Minggu 6 hybrid + rerank):
+//   - VectorScore : 1 - cosine_distance (raw vector similarity)
+//   - BM25Score   : Postgres ts_rank (full-text)
+//   - RRFScore    : Reciprocal Rank Fusion combine score (k=60)
+//   - RerankScore : Voyage rerank-2 relevance (range ~[0, 1], hanya terisi setelah rerank step)
+//   - Similarity  : final score yang FE display. Default = RerankScore kalau ada, else RRFScore.
 type SearchResult struct {
 	DocumentChunk
 	DocumentTitle string  `json:"documentTitle"`
-	Similarity    float64 `json:"similarity"` // 1 - cosine_distance, range [-1, 1] (typical 0..1 untuk teks)
+	VectorScore   float64 `json:"vectorScore,omitempty"`
+	BM25Score     float64 `json:"bm25Score,omitempty"`
+	RRFScore      float64 `json:"rrfScore,omitempty"`
+	RerankScore   float64 `json:"rerankScore,omitempty"`
+	Similarity    float64 `json:"similarity"` // dipakai sebagai "the score" untuk display & threshold
 }

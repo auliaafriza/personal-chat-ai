@@ -67,6 +67,17 @@ func (s *Writer) Error(msg string) error {
 	return s.writeFrame('3', payload)
 }
 
+// Annotation emits an `8:[...]` message-annotation frame. The value MUST be a
+// JSON array; its items are appended to `message.annotations` on the FE.
+// Dipakai untuk kirim RAG sources metadata (Minggu 5).
+func (s *Writer) Annotation(items any) error {
+	payload, err := json.Marshal(items)
+	if err != nil {
+		return err
+	}
+	return s.writeFrame('8', payload)
+}
+
 type FinishInfo struct {
 	FinishReason string `json:"finishReason"`
 	Usage        Usage  `json:"usage"`

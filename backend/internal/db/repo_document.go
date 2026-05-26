@@ -149,6 +149,14 @@ func (r *DocumentRepo) GetByUser(ctx context.Context, id, userID string) (Docume
 	return d, nil
 }
 
+// CountChunksByUser returns the total number of chunks the user has across all
+// documents. Dipakai chat handler untuk decide apakah RAG perlu di-jalankan.
+func (r *DocumentRepo) CountChunksByUser(ctx context.Context, userID string) (int, error) {
+	var n int
+	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM document_chunks WHERE user_id = $1`, userID).Scan(&n)
+	return n, err
+}
+
 func (r *DocumentRepo) DeleteByUser(ctx context.Context, id, userID string) error {
 	tag, err := r.pool.Exec(ctx, `DELETE FROM documents WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
@@ -185,31 +193,88 @@ func (r *DocumentRepo) ListChunksByDocument(ctx context.Context, docID string) (
 	return out, rows.Err()
 }
 
-// SearchSimilar finds the top-k chunks (across all of user's documents) by
-// cosine similarity to the query embedding. Returns chunks sorted by
-// similarity descending.
+// SearchHybrid does Reciprocal Rank Fusion (RRF) atas:
+//   - vector top-N (cosine `<=>`) via HNSW index
+//   - BM25-like top-N (Postgres ts_rank dengan `websearch_to_tsquery`) via GIN index
 //
-// Uses the `<=>` operator (cosine distance). Similarity = 1 - distance.
-func (r *DocumentRepo) SearchSimilar(ctx context.Context, userID string, queryEmbedding []float32, topK int) ([]SearchResult, error) {
+// RRF formula: score = Σ (1 / (k + rank_i)) untuk tiap retriever yang ngasih
+// chunk itu. Standard k=60. Hasilnya stable & parameter-free (nggak perlu
+// normalisasi skor antar retriever yang scale-nya beda).
+//
+// `candidateLimit` = berapa banyak per-retriever yang dipertimbangkan (typically 20).
+// `topK` = berapa hasil final yang di-return. Kalau topK > unique chunks dari
+// kedua retriever, return semua yang ada.
+//
+// Output sorted by RRFScore desc. SearchResult.Similarity diset ke RRFScore
+// supaya konsisten dengan code path yang belum di-rerank. Setelah rerank,
+// caller boleh overwrite Similarity = RerankScore.
+func (r *DocumentRepo) SearchHybrid(
+	ctx context.Context,
+	userID, query string,
+	queryEmbedding []float32,
+	candidateLimit, topK int,
+) ([]SearchResult, error) {
+	if candidateLimit <= 0 {
+		candidateLimit = 20
+	}
 	if topK <= 0 {
 		topK = 5
 	}
-	if topK > 50 {
-		topK = 50
+	if topK > candidateLimit*2 {
+		topK = candidateLimit * 2
 	}
-	vec := vectorLiteral(queryEmbedding)
 
-	rows, err := r.pool.Query(ctx, `
+	vec := vectorLiteral(queryEmbedding)
+	const rrfK = 60
+
+	// Single SQL biar atomic (vector + BM25 + RRF). FULL OUTER JOIN supaya
+	// chunk yang cuma muncul di salah satu retriever tetap dipertimbangkan.
+	const sql = `
+		WITH vector_results AS (
+		    SELECT
+		        c.id, c.document_id, c.user_id, c.position, c.heading, c.content, c.created_at,
+		        d.title AS document_title,
+		        1 - (c.embedding <=> $1::vector) AS vector_score,
+		        ROW_NUMBER() OVER (ORDER BY c.embedding <=> $1::vector ASC) AS vector_rank
+		    FROM document_chunks c
+		    JOIN documents d ON d.id = c.document_id
+		    WHERE c.user_id = $2
+		    ORDER BY c.embedding <=> $1::vector ASC
+		    LIMIT $4
+		),
+		bm25_results AS (
+		    SELECT
+		        c.id, c.document_id, c.user_id, c.position, c.heading, c.content, c.created_at,
+		        d.title AS document_title,
+		        ts_rank(c.content_tsv, q.query) AS bm25_score,
+		        ROW_NUMBER() OVER (ORDER BY ts_rank(c.content_tsv, q.query) DESC) AS bm25_rank
+		    FROM document_chunks c
+		    JOIN documents d ON d.id = c.document_id,
+		         websearch_to_tsquery('simple', $3) AS q(query)
+		    WHERE c.user_id = $2 AND c.content_tsv @@ q.query
+		    ORDER BY ts_rank(c.content_tsv, q.query) DESC
+		    LIMIT $4
+		)
 		SELECT
-		    c.id, c.document_id, c.user_id, c.position, c.heading, c.content, c.created_at,
-		    d.title AS document_title,
-		    1 - (c.embedding <=> $1::vector) AS similarity
-		FROM document_chunks c
-		JOIN documents d ON d.id = c.document_id
-		WHERE c.user_id = $2
-		ORDER BY c.embedding <=> $1::vector ASC
-		LIMIT $3
-	`, vec, userID, topK)
+		    COALESCE(v.id, b.id)                 AS id,
+		    COALESCE(v.document_id, b.document_id),
+		    COALESCE(v.user_id, b.user_id),
+		    COALESCE(v.position, b.position),
+		    COALESCE(v.heading, b.heading),
+		    COALESCE(v.content, b.content),
+		    COALESCE(v.created_at, b.created_at),
+		    COALESCE(v.document_title, b.document_title),
+		    COALESCE(v.vector_score, 0)          AS vector_score,
+		    COALESCE(b.bm25_score, 0)            AS bm25_score,
+		    COALESCE(1.0 / ($5::float + v.vector_rank), 0)
+		      + COALESCE(1.0 / ($5::float + b.bm25_rank), 0) AS rrf_score
+		FROM vector_results v
+		FULL OUTER JOIN bm25_results b ON v.id = b.id
+		ORDER BY rrf_score DESC
+		LIMIT $6
+	`
+
+	rows, err := r.pool.Query(ctx, sql, vec, userID, query, candidateLimit, rrfK, topK)
 	if err != nil {
 		return nil, err
 	}
@@ -217,14 +282,15 @@ func (r *DocumentRepo) SearchSimilar(ctx context.Context, userID string, queryEm
 
 	out := make([]SearchResult, 0, topK)
 	for rows.Next() {
-		var r SearchResult
+		var sr SearchResult
 		if err := rows.Scan(
-			&r.ID, &r.DocumentID, &r.UserID, &r.Position, &r.Heading, &r.Content, &r.CreatedAt,
-			&r.DocumentTitle, &r.Similarity,
+			&sr.ID, &sr.DocumentID, &sr.UserID, &sr.Position, &sr.Heading, &sr.Content, &sr.CreatedAt,
+			&sr.DocumentTitle, &sr.VectorScore, &sr.BM25Score, &sr.RRFScore,
 		); err != nil {
 			return nil, err
 		}
-		out = append(out, r)
+		sr.Similarity = sr.RRFScore
+		out = append(out, sr)
 	}
 	return out, rows.Err()
 }

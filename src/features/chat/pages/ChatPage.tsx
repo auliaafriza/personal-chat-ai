@@ -30,6 +30,14 @@ function dbMessagesToAi(msgs: DbMessage[]): Message[] {
     id: m.id,
     role: m.role as Message["role"],
     content: m.content,
+    // Inject persisted sources sebagai annotation supaya rendering path sama
+    // dengan live stream (lihat extractSources + SourcesFooter).
+    // Cast: interface Source nggak punya index signature jadi nggak otomatis
+    // assignable ke JSONValue — aman karena strukturnya pure JSON.
+    annotations:
+      m.sources && m.sources.length > 0
+        ? ([{ type: "sources", sources: m.sources }] as unknown as Message["annotations"])
+        : undefined,
   }))
 }
 

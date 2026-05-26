@@ -55,14 +55,16 @@ func run() error {
 	// Services
 	anthropicSvc := service.NewGroq(cfg.GroqAPIKey)
 	embedder := service.NewEmbedder(cfg.VoyageAPIKey)
+	reranker := service.NewReranker(cfg.VoyageAPIKey)
+	retriever := service.NewRetriever(docRepo, embedder, reranker)
 
 	// Handlers
 	convH := handler.NewConversationHandler(convRepo)
 	msgH := handler.NewMessageHandler(msgRepo, convRepo)
 	titleH := handler.NewTitleHandler(convRepo, msgRepo, anthropicSvc)
-	chatH := handler.NewChatHandler(convRepo, msgRepo, anthropicSvc)
+	chatH := handler.NewChatHandler(convRepo, msgRepo, docRepo, anthropicSvc, retriever)
 	meH := handler.NewMeHandler(userRepo)
-	docH := handler.NewDocumentHandler(docRepo, embedder)
+	docH := handler.NewDocumentHandler(docRepo, embedder, retriever)
 
 	// Middleware
 	authMw := appmw.Auth(cfg.AuthSecret, userRepo)

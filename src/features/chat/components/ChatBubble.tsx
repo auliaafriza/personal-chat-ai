@@ -5,12 +5,17 @@ import remarkGfm from "remark-gfm"
 
 import { cn } from "@/lib/utils"
 
+import type { Source } from "@/features/chat/types/api"
+
+import { SourcesFooter } from "./SourcesFooter"
+
 interface ChatBubbleProps {
   role: "user" | "assistant" | "system" | "data"
   content: string
+  sources?: Source[]
 }
 
-export function ChatBubble({ role, content }: ChatBubbleProps) {
+export function ChatBubble({ role, content, sources }: ChatBubbleProps) {
   const isUser = role === "user"
 
   return (
@@ -26,9 +31,12 @@ export function ChatBubble({ role, content }: ChatBubbleProps) {
         {isUser ? (
           <p className="whitespace-pre-wrap text-sm leading-relaxed">{content}</p>
         ) : (
-          <div className="prose-chat">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-          </div>
+          <>
+            <div className="prose-chat">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            </div>
+            {sources && sources.length > 0 ? <SourcesFooter sources={sources} /> : null}
+          </>
         )}
       </div>
     </div>

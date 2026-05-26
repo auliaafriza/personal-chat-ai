@@ -3,9 +3,9 @@
 Chat assistant pribadi untuk dokumen, kode, dan produktivitas.
 Bagian dari [Roadmap AI Engineer](../) — proyek yang bertumbuh tiap minggu.
 
-**Status: Minggu 4 — Embeddings & pgvector**
+**Status: Minggu 6 — Hybrid search + reranking**
 
-Architecture: **Next.js FE (Auth.js v5)** ←→ **Go BE (JWT-protected)** ←→ **Neon Postgres (pgvector)**
+Architecture: **Next.js FE (Auth.js v5)** ←→ **Go BE (JWT-protected, RAG)** ←→ **Neon Postgres (pgvector)**
 
 ```
 portofolio-ai-aulia/
@@ -218,9 +218,9 @@ Lihat [backend/README.md](./backend/README.md) untuk struktur lengkap.
 - [x] **Minggu 1** — Setup + streaming chat
 - [x] **Minggu 2** — Persistence (Go BE + Neon Postgres + pgx) + multi-conversation + auto-title
 - [x] **Minggu 3** — Auth (Auth.js v5 + Google OAuth + JWT shared secret) + Settings page + dark mode + Cmd+K/Cmd+/ + mobile responsive
-- [x] **Minggu 4** — Embeddings (Voyage AI voyage-3-lite, 512 dim) + pgvector + document upload (txt/md/pdf/docx + paste) + similarity search UI ← **kamu di sini**
-- [ ] **Minggu 5** — RAG end-to-end + citation
-- [ ] **Minggu 6** — Hybrid search + reranking
+- [x] **Minggu 4** — Embeddings (Voyage AI voyage-3-lite, 512 dim) + pgvector + document upload (txt/md/pdf/docx + paste) + similarity search UI
+- [x] **Minggu 5** — RAG end-to-end (auto-retrieve global) + inline citation [n] + Sources footer + persisted citations
+- [x] **Minggu 6** — Hybrid search (vector + BM25 RRF) + Voyage rerank-2 cross-encoder ← **kamu di sini**
 - [ ] **Minggu 7** — Tool calling (web search, fetch URL)
 - [ ] **Minggu 8** — Coding assistant tools
 - [ ] **Minggu 9** — Productivity tools (Calendar, Task)
@@ -321,12 +321,64 @@ Query text
 []SearchResult  (chunk + documentTitle + similarity)
 ```
 
-## What's Next (Minggu 5 — RAG end-to-end + citation)
+## RAG Flow (Minggu 5)
 
-1. Auto-RAG di chat: kalau ada dokumen, retrieve top-k chunks dari query → inject ke system prompt → cite di response
-2. Per-conversation document binding (atau global search semua docs user)
-3. Citation rendering di FE — clickable link ke chunk source
-4. Streaming + tool-style "retrieving 3 chunks…" indicator
+Auto-RAG aktif kalau user punya ≥1 dokumen. Setiap pesan:
+
+```
+User message
+  ↓ chat handler: CountChunksByUser > 0 ?
+  ↓ ya → embed query (Voyage, input_type=query)
+  ↓ SearchSimilar top-5 (cosine, HNSW)
+  ↓ filter similarity ≥ 0.30
+  ↓ build context block + citation instruction → augment system prompt
+  ↓ kirim sources via AI SDK annotation frame (8:)   ──→ FE: "Membaca N dokumen…" + Sources footer
+  ↓ stream LLM response (Groq) dengan inline [n] markers
+  ↓ save assistant message + sources (JSONB) → citations survive reload
+```
+
+Tuning ada di `backend/internal/handler/chat.go`:
+- `ragTopK = 5` — jumlah chunk yang di-retrieve
+- `ragSimilarityThreshold = 0.30` — di bawah ini chunk diabaikan (anti-noise untuk chit-chat)
+- `ragSnippetMaxChars = 300` — panjang snippet di Sources footer
+
+Citation di-render dua jalur yang sama (lihat `src/features/chat/lib/sources.ts`):
+- **Live stream**: BE kirim `8:[{type:"sources",...}]` → AI SDK `message.annotations`
+- **History**: sources di-load dari DB → di-inject ke `annotations` saat hydrate
+
+## Retrieval Pipeline (Minggu 6)
+
+Setiap chat message (kalau user punya dokumen) + setiap `/documents/search` masuk pipeline yang sama:
+
+```
+Query
+  ↓ embed via Voyage voyage-3-lite (input_type=query)
+  ↓ ┌─────────────────────────────────────────────────────────┐
+    │ Vector top-20    │  BM25 top-20                         │
+    │ pgvector <=>     │  Postgres ts_rank + GIN index        │
+    │ (HNSW, cosine)   │  (config 'simple', websearch_to_tsquery) │
+    └────────┬─────────┴────────┬────────────────────────────┘
+             ↓ RRF combine (k=60) — single SQL dengan FULL OUTER JOIN
+  ↓ top-20 unique candidates (sorted by RRF)
+  ↓ Voyage rerank-2 (cross-encoder, more accurate but slower)
+  ↓ top-5 final + relevance scores
+  ↓ inject ke prompt (RAG) atau return ke search UI
+```
+
+**Kenapa pipeline ini**:
+- **Vector** = semantic similarity (paham sinonim, paraphrase)
+- **BM25** = exact term matching (akurat untuk nama, ID, kode, term unik)
+- **RRF** = combine ranking tanpa perlu normalize skor — parameter-free, robust
+- **Rerank** = cross-encoder lihat query+chunk bareng, jauh lebih akurat dari bi-encoder (embedding) untuk decide relevance
+
+**Graceful degradation**: Rerank gagal? Fallback ke RRF results. Search gagal? Chat tetap jalan tanpa RAG.
+
+## What's Next (Minggu 7 — Tool calling)
+
+1. Tool schema: `web_search`, `fetch_url`, ekstrak markdown dari halaman
+2. Pakai Groq function calling (OpenAI-compatible)
+3. Multi-turn tool loop di chat handler
+4. UI: render tool calls + tool results inline di chat
 
 Detail lengkap di [Roadmap doc](https://docs.google.com/document/d/1yNJwtVLvIDWOd37nubd3-IQaeSPgBmbin-lANCMnh28/edit).
 

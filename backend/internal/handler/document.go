@@ -16,12 +16,13 @@ import (
 )
 
 type DocumentHandler struct {
-	repo     *db.DocumentRepo
-	embedder *service.Embedder
+	repo      *db.DocumentRepo
+	embedder  *service.Embedder
+	retriever *service.Retriever
 }
 
-func NewDocumentHandler(repo *db.DocumentRepo, embedder *service.Embedder) *DocumentHandler {
-	return &DocumentHandler{repo: repo, embedder: embedder}
+func NewDocumentHandler(repo *db.DocumentRepo, embedder *service.Embedder, retriever *service.Retriever) *DocumentHandler {
+	return &DocumentHandler{repo: repo, embedder: embedder, retriever: retriever}
 }
 
 // File upload size cap (10 MB). Adjust kalau perlu PDF/DOCX besar.
@@ -208,11 +209,13 @@ func (h *DocumentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 type searchRequest struct {
-	Query string `json:"query"`
-	TopK  int    `json:"topK"`
+	Query     string `json:"query"`
+	TopK      int    `json:"topK"`
+	NoRerank  bool   `json:"noRerank,omitempty"` // opsional — skip rerank stage (debug / cheap mode)
 }
 
-// POST /documents/search — body { query, topK? } → top-k chunks by cosine similarity.
+// POST /documents/search — body { query, topK?, noRerank? } → hybrid (vector+BM25 RRF)
+// → rerank top-K. Minggu 6 pipeline.
 func (h *DocumentHandler) Search(w http.ResponseWriter, r *http.Request) {
 	user := appmw.UserFromCtx(r.Context())
 	if user == nil {
@@ -234,21 +237,21 @@ func (h *DocumentHandler) Search(w http.ResponseWriter, r *http.Request) {
 		body.TopK = 5
 	}
 
-	qEmb, err := h.embedder.EmbedQuery(r.Context(), body.Query)
+	results, err := h.retriever.Retrieve(r.Context(), user.ID, body.Query, service.RetrieveOptions{
+		CandidateLimit: 20,
+		TopK:           body.TopK,
+		UseRerank:      !body.NoRerank,
+	})
 	if err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("embedding failed: %v", err))
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("retrieval failed: %v", err))
 		return
 	}
 
-	results, err := h.repo.SearchSimilar(r.Context(), user.ID, qEmb, body.TopK)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to search")
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"query":   body.Query,
-		"topK":    body.TopK,
-		"results": results,
+		"query":    body.Query,
+		"topK":     body.TopK,
+		"reranked": !body.NoRerank,
+		"results":  results,
 	})
 }
 

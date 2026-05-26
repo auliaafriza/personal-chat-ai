@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react"
 import type { Message } from "ai"
 import { Loader2 } from "lucide-react"
 
+import { extractSources } from "../lib/sources"
 import { ChatBubble } from "./ChatBubble"
 
 interface MessageListProps {
@@ -29,16 +30,31 @@ export function MessageList({ messages, isStreaming }: MessageListProps) {
     )
   }
 
+  const last = messages[messages.length - 1]
+  // Indikator muncul saat: nunggu token pertama (last msg = user), ATAU
+  // assistant message udah mulai tapi kontennya masih kosong (mis. sources
+  // annotation udah masuk duluan tapi teks belum).
+  const lastSources = last?.role === "assistant" ? extractSources(last) : []
+  const showThinking =
+    isStreaming && (last?.role === "user" || (last?.role === "assistant" && !last.content))
+  const thinkingLabel =
+    lastSources.length > 0 ? `Membaca ${lastSources.length} dokumen…` : "Berpikir…"
+
   return (
     <div className="flex flex-col gap-4 px-4 py-6">
       {messages.map((m) => (
-        <ChatBubble key={m.id} role={m.role} content={m.content} />
+        <ChatBubble
+          key={m.id}
+          role={m.role}
+          content={m.content}
+          sources={m.role === "assistant" ? extractSources(m) : undefined}
+        />
       ))}
-      {isStreaming && messages[messages.length - 1]?.role === "user" ? (
+      {showThinking ? (
         <div className="flex w-full justify-start">
           <div className="flex items-center gap-2 rounded-2xl bg-secondary px-4 py-3 text-sm text-secondary-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            <span>Berpikir…</span>
+            <span>{thinkingLabel}</span>
           </div>
         </div>
       ) : null}

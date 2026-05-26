@@ -32,11 +32,20 @@ export interface DocumentDetail {
 
 export interface SearchResult extends DocumentChunk {
   documentTitle: string
-  similarity: number // [-1..1], typical 0..1
+  // Minggu 6 — breakdown skor pipeline (optional, hanya terisi kalau retriever
+  // mengeksposnya). `similarity` adalah "the score" yang dipakai display:
+  //   - Hybrid + rerank ON  → similarity = rerankScore
+  //   - Hybrid + rerank OFF → similarity = rrfScore
+  vectorScore?: number
+  bm25Score?: number
+  rrfScore?: number
+  rerankScore?: number
+  similarity: number
 }
 
 export interface SearchResponse {
   query: string
   topK: number
+  reranked: boolean
   results: SearchResult[]
 }
