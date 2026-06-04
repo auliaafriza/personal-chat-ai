@@ -78,6 +78,41 @@ func (s *Writer) Annotation(items any) error {
 	return s.writeFrame('8', payload)
 }
 
+// ToolCall emits a `9:{...}` tool-call frame (Minggu 7).
+//
+// AI SDK v4 expects payload shape:
+//   { "toolCallId": "...", "toolName": "...", "args": {...} }
+//
+// FE useChat akan populate message.toolInvocations dengan state "call".
+func (s *Writer) ToolCall(callID, name string, args any) error {
+	payload, err := json.Marshal(map[string]any{
+		"toolCallId": callID,
+		"toolName":   name,
+		"args":       args,
+	})
+	if err != nil {
+		return err
+	}
+	return s.writeFrame('9', payload)
+}
+
+// ToolResult emits an `a:{...}` tool-result frame (Minggu 7).
+//
+// AI SDK v4 expects:
+//   { "toolCallId": "...", "result": <any JSON> }
+//
+// FE useChat transition toolInvocation state ke "result" + populate `result`.
+func (s *Writer) ToolResult(callID string, result any) error {
+	payload, err := json.Marshal(map[string]any{
+		"toolCallId": callID,
+		"result":     result,
+	})
+	if err != nil {
+		return err
+	}
+	return s.writeFrame('a', payload)
+}
+
 type FinishInfo struct {
 	FinishReason string `json:"finishReason"`
 	Usage        Usage  `json:"usage"`

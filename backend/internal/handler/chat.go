@@ -13,6 +13,7 @@ import (
 	appmw "github.com/auliaafriza/personalgpt-backend/internal/middleware"
 	"github.com/auliaafriza/personalgpt-backend/internal/service"
 	"github.com/auliaafriza/personalgpt-backend/internal/stream"
+	"github.com/auliaafriza/personalgpt-backend/internal/tools"
 )
 
 type ChatHandler struct {
@@ -21,6 +22,7 @@ type ChatHandler struct {
 	docRepo   *db.DocumentRepo
 	ai        *service.Anthropic
 	retriever *service.Retriever
+	tools     *tools.Registry
 }
 
 func NewChatHandler(
@@ -29,16 +31,29 @@ func NewChatHandler(
 	docRepo *db.DocumentRepo,
 	ai *service.Anthropic,
 	retriever *service.Retriever,
+	toolReg *tools.Registry,
 ) *ChatHandler {
-	return &ChatHandler{convRepo: convRepo, msgRepo: msgRepo, docRepo: docRepo, ai: ai, retriever: retriever}
+	return &ChatHandler{
+		convRepo:  convRepo,
+		msgRepo:   msgRepo,
+		docRepo:   docRepo,
+		ai:        ai,
+		retriever: retriever,
+		tools:     toolReg,
+	}
 }
 
 // RAG tuning (Minggu 6 — hybrid + rerank).
 const (
-	ragCandidateLimit      = 20   // per-retriever top-N untuk hybrid stage
-	ragTopK                = 5    // final top-K setelah rerank
-	ragSimilarityThreshold = 0.10 // rerank score di bawah ini dianggap nggak relevan
+	ragCandidateLimit      = 20
+	ragTopK                = 5
+	ragSimilarityThreshold = 0.10
 	ragSnippetMaxChars     = 300
+)
+
+// Tool loop tuning (Minggu 7).
+const (
+	maxToolIterations = 5 // berapa kali boleh round-trip ke model (anti-infinite-loop)
 )
 
 // chatRequest matches what AI SDK's useChat() sends.
@@ -72,7 +87,7 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Default ke user settings, lalu override pakai conversation settings (kalau ada).
+	// Default ke user settings, lalu override pakai conversation settings.
 	model := user.DefaultModel
 	if model == "" || strings.HasPrefix(model, "claude-") {
 		model = service.DefaultModel
@@ -106,14 +121,14 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		temperature = conv.Temperature
 	}
 
-	// --- RAG: retrieve relevant chunks dari dokumen user (Minggu 5) ---
+	// --- RAG: retrieve relevant chunks (Minggu 5/6) ---
 	latestUser := latestUserMessage(body.Messages)
 	sources := h.retrieve(ctx, user.ID, latestUser)
 	if len(sources.list) > 0 {
 		systemPrompt = augmentSystemPrompt(systemPrompt, sources.contextBlock)
 	}
 
-	// Save user message (latest one) sebelum streaming, kalau ada conversationId
+	// Save user message sebelum streaming
 	if body.ConversationID != "" && latestUser != "" {
 		if _, err := h.msgRepo.Create(ctx, db.CreateMessageParams{
 			ConversationID: body.ConversationID,
@@ -124,24 +139,28 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Convert AI SDK messages -> internal db.Message slice
-	internalMsgs := make([]db.Message, 0, len(body.Messages))
+	// Build initial turns dari body.Messages (langsung; nggak pakai db.Message
+	// karena body bisa beda dengan apa yg di-DB).
+	turns := make([]service.ChatTurn, 0, len(body.Messages))
 	for _, m := range body.Messages {
-		internalMsgs = append(internalMsgs, db.Message{
-			Role:    db.MessageRole(m.Role),
-			Content: m.Content,
-		})
+		if m.Role == "user" || m.Role == "assistant" {
+			turns = append(turns, service.ChatTurn{Role: m.Role, Content: m.Content})
+		}
 	}
 
-	// Start streaming response
+	// Start streaming response — caller manages MessageStart/Done envelope.
 	sw, err := stream.New(w)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
 
-	// Kirim sources sebagai annotation SEBELUM text — FE bisa render "Membaca N
-	// dokumen…" + Sources footer. AI SDK append ke message.annotations.
+	if err := sw.MessageStart(); err != nil {
+		log.Printf("[Chat] message_start: %v", err)
+		return
+	}
+
+	// Sources annotation (Minggu 5)
 	if len(sources.list) > 0 {
 		_ = sw.Annotation([]map[string]any{{
 			"type":    "sources",
@@ -149,19 +168,71 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}})
 	}
 
-	fullText, _, err := h.ai.Stream(ctx, service.StreamRequest{
-		Model:        model,
-		SystemPrompt: systemPrompt,
-		Temperature:  temperature,
-		Messages:     internalMsgs,
-	}, sw)
-
-	if err != nil {
-		log.Printf("[Chat] stream error: %v", err)
-		return
+	// Tool schemas (Minggu 7) — kosong kalau registry empty.
+	var toolSchemas []tools.Schema
+	if h.tools != nil && !h.tools.Empty() {
+		toolSchemas = h.tools.Schemas()
 	}
 
-	// Save assistant message (+ sources) + bump conversation updated_at
+	// --- Multi-turn tool loop ---
+	var (
+		accumulatedText strings.Builder
+		finalUsage      stream.Usage
+	)
+
+	for iter := 0; iter < maxToolIterations; iter++ {
+		res, err := h.ai.Stream(ctx, service.StreamRequest{
+			Model:        model,
+			SystemPrompt: systemPrompt,
+			Temperature:  temperature,
+			Turns:        turns,
+			Tools:        toolSchemas,
+		}, sw)
+		if err != nil {
+			log.Printf("[Chat] stream iter %d: %v", iter, err)
+			return
+		}
+
+		accumulatedText.WriteString(res.Text)
+		finalUsage = res.Usage
+
+		if res.FinishReason != "tool_calls" || len(res.ToolCalls) == 0 {
+			break // text-only finish; selesai
+		}
+
+		// Tools dipanggil; append assistant turn + execute + append tool turns.
+		turns = append(turns, service.ChatTurn{
+			Role:      "assistant",
+			Content:   res.Text,
+			ToolCalls: res.ToolCalls,
+		})
+
+		for _, tc := range res.ToolCalls {
+			result := h.executeTool(ctx, tc)
+			if err := sw.ToolResult(tc.ID, result); err != nil {
+				log.Printf("[Chat] write tool_result: %v", err)
+			}
+
+			// Append tool turn untuk model di iterasi berikut.
+			rawResult, _ := json.Marshal(result)
+			turns = append(turns, service.ChatTurn{
+				Role:       "tool",
+				Content:    string(rawResult),
+				ToolCallID: tc.ID,
+			})
+		}
+	}
+
+	finish := stream.FinishInfo{FinishReason: "stop", Usage: finalUsage}
+	if err := sw.StepFinish(finish); err != nil {
+		log.Printf("[Chat] step_finish: %v", err)
+	}
+	if err := sw.Done(finish); err != nil {
+		log.Printf("[Chat] done: %v", err)
+	}
+
+	// Persist final assistant message
+	fullText := accumulatedText.String()
 	if body.ConversationID != "" && fullText != "" {
 		if _, err := h.msgRepo.Create(ctx, db.CreateMessageParams{
 			ConversationID: body.ConversationID,
@@ -177,6 +248,30 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// executeTool runs one tool call dan return result (atau error wrapper).
+// Selalu return value yang bisa di-serialize jadi JSON.
+func (h *ChatHandler) executeTool(ctx context.Context, tc tools.ToolCallRequest) any {
+	if h.tools == nil || h.tools.Empty() {
+		return map[string]any{"error": "no tools registered"}
+	}
+
+	if err := tc.ParseArguments(); err != nil {
+		return map[string]any{"error": fmt.Sprintf("invalid arguments JSON: %v", err)}
+	}
+
+	args := tc.Parsed
+	if args == nil {
+		args = map[string]any{}
+	}
+
+	result, err := h.tools.Run(ctx, tc.Name, args)
+	if err != nil {
+		log.Printf("[Chat] tool %q failed: %v", tc.Name, err)
+		return map[string]any{"error": err.Error()}
+	}
+	return result
+}
+
 // retrieveResult bundles the sources list + the formatted context block to inject.
 type retrieveResult struct {
 	list         []db.Source
@@ -184,15 +279,12 @@ type retrieveResult struct {
 }
 
 // retrieve runs the RAG retrieval pipeline (Minggu 6): hybrid search → rerank
-// → filter threshold → build sources + context block. Pipeline-nya di-delegate
-// ke service.Retriever supaya consistent dengan /documents/search.
-// Gagal di mana pun = return empty (chat tetap jalan tanpa RAG).
+// → filter threshold → build sources + context block.
 func (h *ChatHandler) retrieve(ctx context.Context, userID, query string) retrieveResult {
 	if strings.TrimSpace(query) == "" {
 		return retrieveResult{}
 	}
 
-	// Skip embed/search call kalau user nggak punya chunk sama sekali.
 	chunkCount, err := h.docRepo.CountChunksByUser(ctx, userID)
 	if err != nil || chunkCount == 0 {
 		return retrieveResult{}

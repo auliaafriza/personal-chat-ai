@@ -3,7 +3,7 @@
 Chat assistant pribadi untuk dokumen, kode, dan produktivitas.
 Bagian dari [Roadmap AI Engineer](../) — proyek yang bertumbuh tiap minggu.
 
-**Status: Minggu 6 — Hybrid search + reranking**
+**Status: Minggu 7 — Tool calling (web search, fetch URL, calculator, time)**
 
 Architecture: **Next.js FE (Auth.js v5)** ←→ **Go BE (JWT-protected, RAG)** ←→ **Neon Postgres (pgvector)**
 
@@ -220,8 +220,8 @@ Lihat [backend/README.md](./backend/README.md) untuk struktur lengkap.
 - [x] **Minggu 3** — Auth (Auth.js v5 + Google OAuth + JWT shared secret) + Settings page + dark mode + Cmd+K/Cmd+/ + mobile responsive
 - [x] **Minggu 4** — Embeddings (Voyage AI voyage-3-lite, 512 dim) + pgvector + document upload (txt/md/pdf/docx + paste) + similarity search UI
 - [x] **Minggu 5** — RAG end-to-end (auto-retrieve global) + inline citation [n] + Sources footer + persisted citations
-- [x] **Minggu 6** — Hybrid search (vector + BM25 RRF) + Voyage rerank-2 cross-encoder ← **kamu di sini**
-- [ ] **Minggu 7** — Tool calling (web search, fetch URL)
+- [x] **Minggu 6** — Hybrid search (vector + BM25 RRF) + Voyage rerank-2 cross-encoder
+- [x] **Minggu 7** — Tool calling — web_search (Tavily), fetch_url (html→markdown), calculator (expr), get_current_time + multi-turn loop ← **kamu di sini**
 - [ ] **Minggu 8** — Coding assistant tools
 - [ ] **Minggu 9** — Productivity tools (Calendar, Task)
 - [ ] **Minggu 10** — Long-term memory
@@ -373,12 +373,48 @@ Query
 
 **Graceful degradation**: Rerank gagal? Fallback ke RRF results. Search gagal? Chat tetap jalan tanpa RAG.
 
-## What's Next (Minggu 7 — Tool calling)
+## Tool Calling (Minggu 7)
 
-1. Tool schema: `web_search`, `fetch_url`, ekstrak markdown dari halaman
-2. Pakai Groq function calling (OpenAI-compatible)
-3. Multi-turn tool loop di chat handler
-4. UI: render tool calls + tool results inline di chat
+Tools yang tersedia:
+
+| Tool | Description | Provider / lib |
+|---|---|---|
+| `web_search` | Cari di web, return top-N results dengan title/url/snippet | Tavily AI (free 1k/bulan) |
+| `fetch_url` | Download HTML, convert ke markdown | `JohannesKaufmann/html-to-markdown` |
+| `calculator` | Math expression eval (sqrt, pow, sin, dll) | `expr-lang/expr` (sandboxed) |
+| `get_current_time` | Real-time clock + timezone | `time.LoadLocation` |
+
+Pipeline multi-turn (max 5 iter):
+
+```
+User message
+  ↓ chat handler: build initial turns + Tools=registry.Schemas()
+  ↓ loop:
+    │ Groq stream → text deltas + tool_call deltas
+    │ kalau finish_reason == "tool_calls":
+    │    for tc in tool_calls:
+    │       result = registry.Run(tc.name, tc.args)
+    │       emit ToolResult frame (a:)
+    │       append assistant-with-tool_calls turn + tool result turn
+    │    continue
+    │ else: break (finish_reason == "stop")
+  ↓ persist final assistant message
+```
+
+**Frames yang dikirim** (Vercel AI SDK protocol):
+- `9:` tool_call — `{toolCallId, toolName, args}` — saat model decide call tool
+- `a:` tool_result — `{toolCallId, result}` — setelah tool execution selesai
+
+FE pakai `useChat` yang otomatis populate `message.toolInvocations` dari frames itu, lalu `ToolInvocationCard` render dengan icon + collapsible args/result.
+
+**Tavily setup**: signup gratis di [tavily.com](https://tavily.com) (no credit card) → API key ke `TAVILY_API_KEY` di `backend/.env`. Kalau kosong, web_search tool nggak di-register (3 tools lain tetap jalan).
+
+## What's Next (Minggu 8 — Coding assistant tools)
+
+1. `read_file`, `write_file`, `list_directory` — file tools sandboxed ke workspace
+2. `run_shell` (read-only / safe-mode) — execute commands
+3. `search_code` — grep / ripgrep wrapper
+4. UI: render code diffs nicely
 
 Detail lengkap di [Roadmap doc](https://docs.google.com/document/d/1yNJwtVLvIDWOd37nubd3-IQaeSPgBmbin-lANCMnh28/edit).
 

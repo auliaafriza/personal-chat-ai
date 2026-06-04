@@ -9,13 +9,14 @@ import (
 )
 
 type Config struct {
-	Port          string
-	Env           string
-	DatabaseURL   string
-	GroqAPIKey    string
-	VoyageAPIKey  string
-	AuthSecret    string
-	CORSOrigins   []string
+	Port         string
+	Env          string
+	DatabaseURL  string
+	GroqAPIKey   string
+	VoyageAPIKey string
+	TavilyAPIKey string // optional — kalau kosong, web_search tool nggak di-register
+	AuthSecret   string
+	CORSOrigins  []string
 }
 
 func Load() (*Config, error) {
@@ -28,6 +29,7 @@ func Load() (*Config, error) {
 		DatabaseURL:  os.Getenv("DATABASE_URL"),
 		GroqAPIKey:   os.Getenv("GROQ_API_KEY"),
 		VoyageAPIKey: os.Getenv("VOYAGE_API_KEY"),
+		TavilyAPIKey: os.Getenv("TAVILY_API_KEY"),
 		AuthSecret:   os.Getenv("AUTH_SECRET"),
 		CORSOrigins:  parseOrigins(getEnv("CORS_ORIGINS", "http://localhost:3000")),
 	}

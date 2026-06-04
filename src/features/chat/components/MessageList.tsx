@@ -48,6 +48,7 @@ export function MessageList({ messages, isStreaming }: MessageListProps) {
           role={m.role}
           content={m.content}
           sources={m.role === "assistant" ? extractSources(m) : undefined}
+          toolInvocations={m.role === "assistant" ? m.toolInvocations : undefined}
         />
       ))}
       {showThinking ? (

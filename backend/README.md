@@ -86,12 +86,19 @@ backend/
 │   │   ├── document.go           # Upload + List + Search (Minggu 4)
 │   │   └── errors.go
 │   ├── service/
-│   │   ├── anthropic.go          # Groq Chat Completions client (OpenAI-compatible SSE)
+│   │   ├── anthropic.go          # Groq Chat Completions client (SSE + tool_calls, Minggu 7)
 │   │   ├── embeddings.go         # Voyage AI client (voyage-3-lite, 512 dim)
 │   │   ├── rerank.go             # Voyage rerank-2 client (cross-encoder, Minggu 6)
 │   │   ├── retriever.go          # Orchestrator: embed → hybrid → rerank (Minggu 6)
 │   │   ├── parser.go             # txt/md/pdf/docx → plain text
 │   │   └── chunker.go            # Heading-aware + fallback fixed-size chunking
+│   ├── tools/                    # Minggu 7 — tool calling
+│   │   ├── types.go              # Tool interface + Schema (OpenAI format)
+│   │   ├── registry.go           # Tool registry (Register/Run by name)
+│   │   ├── web_search.go         # Tavily AI search
+│   │   ├── fetch_url.go          # HTML fetch + markdown conversion
+│   │   ├── calculator.go         # Math expression eval (expr-lang/expr)
+│   │   └── current_time.go       # Real-time clock + timezone
 │   ├── middleware/
 │   │   ├── logger.go
 │   │   └── auth.go               # HS256 JWT validate + user upsert + ctx injection
@@ -250,4 +257,25 @@ ragTopK                = 5    // final top-K setelah rerank
 ragSimilarityThreshold = 0.10 // rerank score di bawah ini = nggak relevan
 ```
 
-Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 6.
+## Tool Calling (Minggu 7)
+
+`internal/tools` package implements OpenAI-compatible function calling buat Groq. 4 tools registered di main.go (Tavily optional):
+
+| Tool | Args | Provider |
+|---|---|---|
+| `web_search` | `{ query, max_results? }` | Tavily AI |
+| `fetch_url` | `{ url }` | net/http + html-to-markdown |
+| `calculator` | `{ expression }` | expr-lang/expr |
+| `get_current_time` | `{ timezone? }` | stdlib `time` |
+
+Pipeline di `handler/chat.go`:
+1. Stream service kirim request ke Groq dengan `tools: [...]`
+2. Groq emit tool_call deltas via SSE (per-index, partial args)
+3. Service accumulate ke `ToolCallRequest` list, emit `9:` frame (AI SDK protocol)
+4. Handler execute via registry, emit `a:` frame untuk tiap result
+5. Append assistant-with-tool_calls + tool turns ke message history
+6. Loop sampai finish_reason == "stop" atau max 5 iterasi
+
+Graceful: tool fail → return `{error: "..."}` ke model, model bisa adapt atau apologize. Registry empty → tools nggak di-send, chat behaves seperti sebelum Minggu 7.
+
+Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 7.

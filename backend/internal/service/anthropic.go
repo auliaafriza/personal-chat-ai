@@ -12,6 +12,7 @@ import (
 
 	"github.com/auliaafriza/personalgpt-backend/internal/db"
 	"github.com/auliaafriza/personalgpt-backend/internal/stream"
+	"github.com/auliaafriza/personalgpt-backend/internal/tools"
 )
 
 const (
@@ -29,7 +30,7 @@ type Groq struct {
 	http   *http.Client
 }
 
-// Keep Anthropic as alias so handler files compile without changes.
+// Keep Anthropic as alias so older code paths compile (kept for stability).
 type Anthropic = Groq
 
 func NewGroq(apiKey string) *Groq {
@@ -43,9 +44,25 @@ func NewAnthropic(apiKey string) *Groq { return NewGroq(apiKey) }
 
 // --- OpenAI-compatible request/response shapes ---
 
+// groqMessage extended untuk support tool calling (Minggu 7).
+// Content nullable (*string) karena assistant turn yang request tool_call
+// punya content == null per OpenAI spec.
 type groqMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string         `json:"role"`
+	Content    *string        `json:"content"`
+	ToolCalls  []groqToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+}
+
+type groqToolCall struct {
+	ID       string               `json:"id"`
+	Type     string               `json:"type"` // "function"
+	Function groqToolCallFunction `json:"function"`
+}
+
+type groqToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"` // JSON-encoded string per OpenAI spec
 }
 
 type groqRequest struct {
@@ -55,17 +72,20 @@ type groqRequest struct {
 	Temperature   float64       `json:"temperature"`
 	Stream        bool          `json:"stream"`
 	StreamOptions *streamOpts   `json:"stream_options,omitempty"`
+	Tools         []tools.Schema `json:"tools,omitempty"`
+	ToolChoice    string        `json:"tool_choice,omitempty"` // "auto" by default
 }
 
 type streamOpts struct {
 	IncludeUsage bool `json:"include_usage"`
 }
 
-// SSE chunk — OpenAI/Groq streaming format.
+// SSE chunk — extended dengan tool_calls deltas.
 type groqChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content   string                  `json:"content"`
+			ToolCalls []groqToolCallDelta     `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
@@ -75,7 +95,21 @@ type groqChunk struct {
 	} `json:"usage"`
 }
 
-// Non-streaming response.
+// Tool call streaming deltas: dikirim per-chunk dengan partial fields.
+// Multiple tool calls dibedakan dengan field Index.
+type groqToolCallDelta struct {
+	Index    int                       `json:"index"`
+	ID       string                    `json:"id,omitempty"`
+	Type     string                    `json:"type,omitempty"`
+	Function groqToolCallDeltaFunction `json:"function,omitempty"`
+}
+
+type groqToolCallDeltaFunction struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"` // partial JSON chunks; concat
+}
+
+// Non-streaming response (untuk title gen).
 type groqResponse struct {
 	Choices []struct {
 		Message struct {
@@ -95,18 +129,40 @@ type groqErrorResp struct {
 	} `json:"error"`
 }
 
-// --- Public types (same as before so handlers don't change) ---
+// --- Public types ---
+
+// ChatTurn = satu turn dalam conversation, support semua role termasuk tool.
+// Caller (chat handler) bertanggung jawab build slice ini, termasuk tool turns
+// di iterasi berikutnya.
+type ChatTurn struct {
+	Role       string                  // "user" | "assistant" | "tool"
+	Content    string                  // text content (kosong untuk assistant-with-tool-calls)
+	ToolCalls  []tools.ToolCallRequest // assistant turn requesting tool calls
+	ToolCallID string                  // tool turn — references the call this responds to
+}
 
 type StreamRequest struct {
 	Model        string
 	SystemPrompt string
 	Temperature  float64
-	Messages     []db.Message
+	Turns        []ChatTurn // full conversation, caller builds
+	Tools        []tools.Schema
 }
 
-// Stream calls Groq's streaming endpoint and forwards text deltas to the
-// AI SDK writer. Returns full assembled text + token usage.
-func (g *Groq) Stream(ctx context.Context, req StreamRequest, sw *stream.Writer) (string, stream.Usage, error) {
+// StreamResult = output dari satu turn Stream call. Kalau FinishReason =
+// "tool_calls", caller harus execute tools, append result turns, dan call
+// Stream lagi.
+type StreamResult struct {
+	Text         string
+	ToolCalls    []tools.ToolCallRequest
+	FinishReason string // "stop" | "tool_calls" | "length"
+	Usage        stream.Usage
+}
+
+// Stream calls Groq's streaming endpoint. Emit text frames + tool_call frames
+// ke writer. Does NOT emit MessageStart/StepFinish/Done — caller manages
+// envelope (supaya bisa multi-turn dalam satu message).
+func (g *Groq) Stream(ctx context.Context, req StreamRequest, sw *stream.Writer) (StreamResult, error) {
 	model := req.Model
 	if model == "" {
 		model = DefaultModel
@@ -116,37 +172,37 @@ func (g *Groq) Stream(ctx context.Context, req StreamRequest, sw *stream.Writer)
 		systemPrompt = DefaultSystemPrompt
 	}
 
-	msgs := buildMessages(systemPrompt, req.Messages)
-
 	body := groqRequest{
 		Model:         model,
-		Messages:      msgs,
+		Messages:      buildMessages(systemPrompt, req.Turns),
 		MaxTokens:     DefaultMaxTokens,
 		Temperature:   req.Temperature,
 		Stream:        true,
 		StreamOptions: &streamOpts{IncludeUsage: true},
 	}
+	if len(req.Tools) > 0 {
+		body.Tools = req.Tools
+		body.ToolChoice = "auto"
+	}
 
 	resp, err := g.doRequest(ctx, body)
 	if err != nil {
 		_ = sw.Error(err.Error())
-		return "", stream.Usage{}, err
+		return StreamResult{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		msg := readGroqError(resp.Body)
 		_ = sw.Error(msg)
-		return "", stream.Usage{}, fmt.Errorf("groq API %d: %s", resp.StatusCode, msg)
-	}
-
-	if err := sw.MessageStart(); err != nil {
-		return "", stream.Usage{}, fmt.Errorf("write message start: %w", err)
+		return StreamResult{}, fmt.Errorf("groq API %d: %s", resp.StatusCode, msg)
 	}
 
 	var (
-		fullText strings.Builder
-		usage    stream.Usage
+		fullText  strings.Builder
+		usage     stream.Usage
+		finish    string
+		toolCalls = newToolCallBuffer()
 	)
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -171,35 +227,99 @@ func (g *Groq) Stream(ctx context.Context, req StreamRequest, sw *stream.Writer)
 			usage.PromptTokens = chunk.Usage.PromptTokens
 			usage.CompletionTokens = chunk.Usage.CompletionTokens
 		}
-
 		if len(chunk.Choices) == 0 {
 			continue
 		}
-		text := chunk.Choices[0].Delta.Content
-		if text == "" {
-			continue
+		choice := chunk.Choices[0]
+
+		// Text delta
+		if choice.Delta.Content != "" {
+			if err := sw.Text(choice.Delta.Content); err != nil {
+				return StreamResult{}, fmt.Errorf("write text: %w", err)
+			}
+			fullText.WriteString(choice.Delta.Content)
 		}
-		if err := sw.Text(text); err != nil {
-			return fullText.String(), usage, fmt.Errorf("write text: %w", err)
+
+		// Tool call deltas (multiple bisa muncul dalam satu chunk).
+		for _, d := range choice.Delta.ToolCalls {
+			toolCalls.apply(d)
 		}
-		fullText.WriteString(text)
+
+		if choice.FinishReason != nil {
+			finish = *choice.FinishReason
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		_ = sw.Error(err.Error())
-		return fullText.String(), usage, fmt.Errorf("read stream: %w", err)
+		return StreamResult{Text: fullText.String(), Usage: usage}, fmt.Errorf("read stream: %w", err)
 	}
 
-	finish := stream.FinishInfo{FinishReason: "stop", Usage: usage}
-	if err := sw.StepFinish(finish); err != nil {
-		return fullText.String(), usage, fmt.Errorf("write step finish: %w", err)
-	}
-	if err := sw.Done(finish); err != nil {
-		return fullText.String(), usage, fmt.Errorf("write done: %w", err)
+	completedCalls := toolCalls.finalize()
+
+	// Emit ToolCall frame untuk setiap completed tool call BEFORE returning.
+	// Tools belum di-execute di sini; caller eksekusi setelah Stream return.
+	for _, tc := range completedCalls {
+		_ = tc.ParseArguments() // populate tc.Parsed (best-effort)
+		var argsForFE any
+		if tc.Parsed != nil {
+			argsForFE = tc.Parsed
+		} else {
+			argsForFE = json.RawMessage(tc.Arguments)
+		}
+		if err := sw.ToolCall(tc.ID, tc.Name, argsForFE); err != nil {
+			return StreamResult{}, fmt.Errorf("write tool_call: %w", err)
+		}
 	}
 
-	return fullText.String(), usage, nil
+	return StreamResult{
+		Text:         fullText.String(),
+		ToolCalls:    completedCalls,
+		FinishReason: finish,
+		Usage:        usage,
+	}, nil
 }
+
+// --- Tool call assembly buffer ---
+//
+// Groq mengirim tool_call deltas dengan partial fields. Kita perlu buffer
+// per-index sampai stream selesai, baru emit lengkap.
+type toolCallBuffer struct {
+	byIndex map[int]*tools.ToolCallRequest
+	order   []int
+}
+
+func newToolCallBuffer() *toolCallBuffer {
+	return &toolCallBuffer{byIndex: map[int]*tools.ToolCallRequest{}}
+}
+
+func (b *toolCallBuffer) apply(d groqToolCallDelta) {
+	tc, ok := b.byIndex[d.Index]
+	if !ok {
+		tc = &tools.ToolCallRequest{}
+		b.byIndex[d.Index] = tc
+		b.order = append(b.order, d.Index)
+	}
+	if d.ID != "" {
+		tc.ID = d.ID
+	}
+	if d.Function.Name != "" {
+		tc.Name = d.Function.Name
+	}
+	if d.Function.Arguments != "" {
+		tc.Arguments += d.Function.Arguments
+	}
+}
+
+func (b *toolCallBuffer) finalize() []tools.ToolCallRequest {
+	out := make([]tools.ToolCallRequest, 0, len(b.order))
+	for _, idx := range b.order {
+		out = append(out, *b.byIndex[idx])
+	}
+	return out
+}
+
+// --- Non-streaming (title gen) ---
 
 // GenerateTitle calls a small Groq model for a quick, non-streaming title.
 func (g *Groq) GenerateTitle(ctx context.Context, messages []db.Message) (string, error) {
@@ -223,11 +343,14 @@ func (g *Groq) GenerateTitle(ctx context.Context, messages []db.Message) (string
 		"buat judul SINGKAT (max 6 kata) yang menggambarkan topik utama. " +
 		"Output HANYA judulnya, tanpa tanda kutip, tanpa prefix, tanpa periode di akhir."
 
+	sys := systemPrompt
+	usr := fmt.Sprintf("Percakapan:\n\n%s\nJudul:", transcript.String())
+
 	body := groqRequest{
 		Model: TitleModel,
 		Messages: []groqMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: fmt.Sprintf("Percakapan:\n\n%s\nJudul:", transcript.String())},
+			{Role: "system", Content: &sys},
+			{Role: "user", Content: &usr},
 		},
 		MaxTokens:   30,
 		Temperature: 0.3,
@@ -276,15 +399,67 @@ func (g *Groq) doRequest(ctx context.Context, body groqRequest) (*http.Response,
 	return resp, nil
 }
 
-// buildMessages puts system prompt first, then user/assistant turns.
-func buildMessages(systemPrompt string, msgs []db.Message) []groqMessage {
-	out := make([]groqMessage, 0, len(msgs)+1)
+// buildMessages: system + turns → groq message slice.
+// Handle assistant-with-tool_calls (content null) dan tool messages.
+func buildMessages(systemPrompt string, turns []ChatTurn) []groqMessage {
+	out := make([]groqMessage, 0, len(turns)+1)
 	if systemPrompt != "" {
-		out = append(out, groqMessage{Role: "system", Content: systemPrompt})
+		sys := systemPrompt
+		out = append(out, groqMessage{Role: "system", Content: &sys})
 	}
+	for _, t := range turns {
+		switch t.Role {
+		case "user":
+			c := t.Content
+			out = append(out, groqMessage{Role: "user", Content: &c})
+		case "assistant":
+			// Assistant bisa: (a) pure text, (b) tool_calls-only, (c) text + tool_calls.
+			msg := groqMessage{Role: "assistant"}
+			if t.Content != "" {
+				c := t.Content
+				msg.Content = &c
+			} else {
+				// Content null untuk tool_calls-only turn.
+				msg.Content = nil
+			}
+			if len(t.ToolCalls) > 0 {
+				msg.ToolCalls = make([]groqToolCall, 0, len(t.ToolCalls))
+				for _, tc := range t.ToolCalls {
+					args := tc.Arguments
+					if args == "" {
+						args = "{}"
+					}
+					msg.ToolCalls = append(msg.ToolCalls, groqToolCall{
+						ID:   tc.ID,
+						Type: "function",
+						Function: groqToolCallFunction{
+							Name:      tc.Name,
+							Arguments: args,
+						},
+					})
+				}
+			}
+			out = append(out, msg)
+		case "tool":
+			c := t.Content
+			out = append(out, groqMessage{
+				Role:       "tool",
+				Content:    &c,
+				ToolCallID: t.ToolCallID,
+			})
+		}
+	}
+	return out
+}
+
+// FromDBMessages converts persisted messages ke ChatTurn (initial state at start
+// of /chat request). Tool turns nggak persisted, jadi mereka hanya muncul
+// di iterasi runtime — caller append manually.
+func FromDBMessages(msgs []db.Message) []ChatTurn {
+	out := make([]ChatTurn, 0, len(msgs))
 	for _, m := range msgs {
 		if m.Role == db.RoleUser || m.Role == db.RoleAssistant {
-			out = append(out, groqMessage{Role: string(m.Role), Content: m.Content})
+			out = append(out, ChatTurn{Role: string(m.Role), Content: m.Content})
 		}
 	}
 	return out

@@ -18,6 +18,7 @@ import (
 	"github.com/auliaafriza/personalgpt-backend/internal/handler"
 	appmw "github.com/auliaafriza/personalgpt-backend/internal/middleware"
 	"github.com/auliaafriza/personalgpt-backend/internal/service"
+	"github.com/auliaafriza/personalgpt-backend/internal/tools"
 )
 
 func main() {
@@ -58,11 +59,25 @@ func run() error {
 	reranker := service.NewReranker(cfg.VoyageAPIKey)
 	retriever := service.NewRetriever(docRepo, embedder, reranker)
 
+	// Tool registry (Minggu 7) — web_search optional kalau TAVILY_API_KEY ada.
+	toolReg := tools.NewRegistry(
+		tools.NewCalculator(),
+		tools.NewCurrentTime(),
+		tools.NewFetchURL(),
+	)
+	if cfg.TavilyAPIKey != "" {
+		toolReg.Register(tools.NewWebSearch(cfg.TavilyAPIKey))
+		log.Printf("✓ web_search enabled (Tavily)")
+	} else {
+		log.Printf("⚠ TAVILY_API_KEY empty — web_search tool disabled")
+	}
+	log.Printf("✓ Tools registered: %v", toolReg.Names())
+
 	// Handlers
 	convH := handler.NewConversationHandler(convRepo)
 	msgH := handler.NewMessageHandler(msgRepo, convRepo)
 	titleH := handler.NewTitleHandler(convRepo, msgRepo, anthropicSvc)
-	chatH := handler.NewChatHandler(convRepo, msgRepo, docRepo, anthropicSvc, retriever)
+	chatH := handler.NewChatHandler(convRepo, msgRepo, docRepo, anthropicSvc, retriever, toolReg)
 	meH := handler.NewMeHandler(userRepo)
 	docH := handler.NewDocumentHandler(docRepo, embedder, retriever)
 
