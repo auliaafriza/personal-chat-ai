@@ -1,6 +1,6 @@
 module github.com/auliaafriza/personalgpt-backend
 
-go 1.25
+go 1.23
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
