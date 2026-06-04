@@ -1,5 +1,6 @@
 # --- Build stage ---
-FROM golang:1.23-alpine AS builder
+# Pin Go 1.25 — indirect dep rogpeppe/go-internal@v1.15.0 requires it.
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
