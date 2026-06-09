@@ -199,6 +199,18 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		accumulatedText.WriteString(res.Text)
 		finalUsage = res.Usage
 
+		// Tutup LLM step ini dengan `e:` (step finish) — WAJIB sebelum tool
+		// results (`a:`) atau next iter, supaya AI SDK v4 parser di FE bisa
+		// transisi state dengan benar. Tanpa ini, useChat onError fires
+		// dengan toast "Gagal mengirim pesan" walau BE-nya sukses.
+		stepFinish := stream.FinishInfo{
+			FinishReason: mapFinishReason(res.FinishReason),
+			Usage:        res.Usage,
+		}
+		if err := sw.StepFinish(stepFinish); err != nil {
+			log.Printf("[Chat] step_finish iter %d: %v", iter, err)
+		}
+
 		if res.FinishReason != "tool_calls" || len(res.ToolCalls) == 0 {
 			break // text-only finish; selesai
 		}
@@ -226,11 +238,8 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	finish := stream.FinishInfo{FinishReason: "stop", Usage: finalUsage}
-	if err := sw.StepFinish(finish); err != nil {
-		log.Printf("[Chat] step_finish: %v", err)
-	}
-	if err := sw.Done(finish); err != nil {
+	// Final message done frame.
+	if err := sw.Done(stream.FinishInfo{FinishReason: "stop", Usage: finalUsage}); err != nil {
 		log.Printf("[Chat] done: %v", err)
 	}
 
@@ -359,4 +368,19 @@ func truncateRunes(s string, max int) string {
 		return s
 	}
 	return string(r[:max]) + "…"
+}
+
+// mapFinishReason translate Groq's "tool_calls" → AI SDK's "tool-calls" (dash).
+// AI SDK v4 parser strict tentang nilai ini di frame `e:` dan `d:`.
+func mapFinishReason(groq string) string {
+	switch groq {
+	case "tool_calls":
+		return "tool-calls"
+	case "stop", "length":
+		return groq
+	case "":
+		return "stop"
+	default:
+		return groq
+	}
 }
