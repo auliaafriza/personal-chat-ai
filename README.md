@@ -3,7 +3,7 @@
 Chat assistant pribadi untuk dokumen, kode, dan produktivitas.
 Bagian dari [Roadmap AI Engineer](../) — proyek yang bertumbuh tiap minggu.
 
-**Status: Minggu 7 — Tool calling (web search, fetch URL, calculator, time)**
+**Status: Minggu 8 — Coding assistant tools (file ops + safe shell)**
 
 Architecture: **Next.js FE (Auth.js v5)** ←→ **Go BE (JWT-protected, RAG)** ←→ **Neon Postgres (pgvector)**
 
@@ -221,8 +221,8 @@ Lihat [backend/README.md](./backend/README.md) untuk struktur lengkap.
 - [x] **Minggu 4** — Embeddings (Voyage AI voyage-3-lite, 512 dim) + pgvector + document upload (txt/md/pdf/docx + paste) + similarity search UI
 - [x] **Minggu 5** — RAG end-to-end (auto-retrieve global) + inline citation [n] + Sources footer + persisted citations
 - [x] **Minggu 6** — Hybrid search (vector + BM25 RRF) + Voyage rerank-2 cross-encoder
-- [x] **Minggu 7** — Tool calling — web_search (Tavily), fetch_url (html→markdown), calculator (expr), get_current_time + multi-turn loop ← **kamu di sini**
-- [ ] **Minggu 8** — Coding assistant tools
+- [x] **Minggu 7** — Tool calling — web_search (Tavily), fetch_url (html→markdown), calculator (expr), get_current_time + multi-turn loop
+- [x] **Minggu 8** — Coding assistant tools — read_file, write_file, list_directory, search_code, run_shell (allowlist) + per-user workspace sandbox + syntax highlight + diff viewer ← **kamu di sini**
 - [ ] **Minggu 9** — Productivity tools (Calendar, Task)
 - [ ] **Minggu 10** — Long-term memory
 - [ ] **Minggu 11** — Evals + observability
@@ -409,12 +409,39 @@ FE pakai `useChat` yang otomatis populate `message.toolInvocations` dari frames 
 
 **Tavily setup**: signup gratis di [tavily.com](https://tavily.com) (no credit card) → API key ke `TAVILY_API_KEY` di `backend/.env`. Kalau kosong, web_search tool nggak di-register (3 tools lain tetap jalan).
 
-## What's Next (Minggu 8 — Coding assistant tools)
+## Coding Tools (Minggu 8)
 
-1. `read_file`, `write_file`, `list_directory` — file tools sandboxed ke workspace
-2. `run_shell` (read-only / safe-mode) — execute commands
-3. `search_code` — grep / ripgrep wrapper
-4. UI: render code diffs nicely
+5 tools baru sandboxed ke `<WORKSPACE_ROOT>/<user_id>/`:
+
+| Tool | Description |
+|---|---|
+| `read_file` | Baca file (max 200 KB) dengan optional `line_start`/`line_end` |
+| `write_file` | Create/overwrite (max 1 MB), auto-create parent dirs |
+| `list_directory` | List entries (1-level, sorted dirs first) |
+| `search_code` | Regex match across files; skip node_modules/.git/dist/etc; max 200 hits |
+| `run_shell` | Allowlist read-only: ls/cat/find/grep/wc/head/tail/file/du/tree + git (log/status/diff/show/branch/ls-files/blame). NO shell expansion |
+
+**Security**:
+- Path validation: reject absolute, reject `..`, verify resolved path stays inside user dir via `filepath.Rel` defense-in-depth.
+- Shell: pakai `exec.Command` (NOT `sh -c`) — no shell expansion. Tokenizer reject `& | ; < > $ ( ) { } \``. Timeout 15s, output cap 50 KB.
+- File ops: read 200 KB cap, write 1 MB cap.
+- User ID di-inject via `workspace.WithUser(ctx, user.ID)` di chat handler — tools cek `workspace.UserFromContext(ctx)` sebelum touch filesystem.
+
+**FE rendering**:
+- Code blocks dapat syntax highlight (Prism via `react-syntax-highlighter`) + copy button.
+- `ToolInvocationCard` render per-tool: `read_file` jadi CodeBlock, `list_directory` jadi tree icons, `search_code` jadi `path:line` hits, `run_shell` jadi terminal stdout/stderr.
+- `DiffViewer` component tersedia (lazy-loaded `react-diff-viewer-continued`) untuk render diff.
+
+**Workspace location**:
+- Local dev: `./tmp/workspaces/` (relative ke `backend/`)
+- Production (Railway): `/data/workspaces` — attach Volume di Railway service supaya file persist across deploy.
+
+## What's Next (Minggu 9 — Productivity tools)
+
+1. Calendar integration (Google Calendar API)
+2. Task management (todo CRUD)
+3. Email summary (Gmail read-only)
+4. Notification scheduler
 
 Detail lengkap di [Roadmap doc](https://docs.google.com/document/d/1yNJwtVLvIDWOd37nubd3-IQaeSPgBmbin-lANCMnh28/edit).
 

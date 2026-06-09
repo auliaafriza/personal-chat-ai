@@ -14,6 +14,7 @@ import (
 	"github.com/auliaafriza/personalgpt-backend/internal/service"
 	"github.com/auliaafriza/personalgpt-backend/internal/stream"
 	"github.com/auliaafriza/personalgpt-backend/internal/tools"
+	"github.com/auliaafriza/personalgpt-backend/internal/workspace"
 )
 
 type ChatHandler struct {
@@ -85,7 +86,9 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
+	// Inject user ID ke context supaya workspace tools (Minggu 8) bisa
+	// resolve per-user sandbox path tanpa di-pass eksplisit.
+	ctx := workspace.WithUser(r.Context(), user.ID)
 
 	// Default ke user settings, lalu override pakai conversation settings.
 	model := user.DefaultModel

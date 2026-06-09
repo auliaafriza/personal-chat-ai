@@ -278,4 +278,23 @@ Pipeline di `handler/chat.go`:
 
 Graceful: tool fail → return `{error: "..."}` ke model, model bisa adapt atau apologize. Registry empty → tools nggak di-send, chat behaves seperti sebelum Minggu 7.
 
-Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 7.
+## Coding Tools (Minggu 8)
+
+Package `internal/workspace` provides per-user sandboxed filesystem area di `<WORKSPACE_ROOT>/<user_id>/`. Strict path validation: no abs, no `..`, verify via `filepath.Rel` defense-in-depth.
+
+5 tools baru di `internal/tools/`:
+| Tool | File |
+|---|---|
+| `read_file` | `read_file.go` — line range support |
+| `write_file` | `write_file.go` — 1 MB cap |
+| `list_directory` | `list_directory.go` — sorted, dirs first |
+| `search_code` | `search_code.go` — regex walk, skip node_modules/.git/etc |
+| `run_shell` | `run_shell.go` — allowlist + tokenizer rejecting shell meta |
+
+Tool reads user ID from ctx via `workspace.UserFromContext(ctx)`. Chat handler inject via `ctx = workspace.WithUser(r.Context(), user.ID)` sebelum tool execution.
+
+Allowlist (`run_shell`): `ls cat find grep wc head tail file du tree`, plus `git` dengan sub-allowlist `log status diff show branch ls-files blame`. NO destructive (rm/mv/install/curl/etc). NO shell expansion (`exec.Command` bukan `sh -c`).
+
+Production deployment: Railway needs Volume mount di `/data` supaya workspace files persist. Tanpa volume, files hilang tiap deploy.
+
+Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 8.

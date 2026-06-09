@@ -1,13 +1,14 @@
 "use client"
 
 import type { ToolInvocation } from "ai"
-import ReactMarkdown from "react-markdown"
+import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { cn } from "@/lib/utils"
 
 import type { Source } from "@/features/chat/types/api"
 
+import { CodeBlock } from "./CodeBlock"
 import { SourcesFooter } from "./SourcesFooter"
 import { ToolInvocationCard } from "./ToolInvocationCard"
 
@@ -16,6 +17,27 @@ interface ChatBubbleProps {
   content: string
   sources?: Source[]
   toolInvocations?: ToolInvocation[]
+}
+
+// Custom markdown components: render code blocks pakai CodeBlock supaya dapat
+// syntax highlighting + copy button (Minggu 8).
+const markdownComponents: Components = {
+  code({ inline, className, children, ...props }: {
+    inline?: boolean
+    className?: string
+    children?: React.ReactNode
+  } & React.HTMLAttributes<HTMLElement>) {
+    const match = /language-(\w+)/.exec(className ?? "")
+    const value = String(children ?? "").replace(/\n$/, "")
+    if (inline) {
+      return <CodeBlock value={value} inline {...props} />
+    }
+    return <CodeBlock language={match?.[1]} value={value} {...props} />
+  },
+  pre({ children }) {
+    // CodeBlock already renders its own wrapper; bypass default <pre>.
+    return <>{children}</>
+  },
 }
 
 export function ChatBubble({ role, content, sources, toolInvocations }: ChatBubbleProps) {
@@ -44,7 +66,9 @@ export function ChatBubble({ role, content, sources, toolInvocations }: ChatBubb
             ) : null}
             {content ? (
               <div className="prose-chat">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                  {content}
+                </ReactMarkdown>
               </div>
             ) : null}
             {sources && sources.length > 0 ? <SourcesFooter sources={sources} /> : null}

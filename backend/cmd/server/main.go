@@ -19,6 +19,7 @@ import (
 	appmw "github.com/auliaafriza/personalgpt-backend/internal/middleware"
 	"github.com/auliaafriza/personalgpt-backend/internal/service"
 	"github.com/auliaafriza/personalgpt-backend/internal/tools"
+	"github.com/auliaafriza/personalgpt-backend/internal/workspace"
 )
 
 func main() {
@@ -59,11 +60,25 @@ func run() error {
 	reranker := service.NewReranker(cfg.VoyageAPIKey)
 	retriever := service.NewRetriever(docRepo, embedder, reranker)
 
-	// Tool registry (Minggu 7) — web_search optional kalau TAVILY_API_KEY ada.
+	// Workspace (Minggu 8) — per-user sandbox folder utk coding tools.
+	ws, err := workspace.New(cfg.WorkspaceRoot)
+	if err != nil {
+		return err
+	}
+	log.Printf("✓ Workspace root: %s", ws.Root())
+
+	// Tool registry (Minggu 7 + 8).
 	toolReg := tools.NewRegistry(
+		// Generic tools (Minggu 7)
 		tools.NewCalculator(),
 		tools.NewCurrentTime(),
 		tools.NewFetchURL(),
+		// Coding tools (Minggu 8)
+		tools.NewReadFile(ws),
+		tools.NewWriteFile(ws),
+		tools.NewListDirectory(ws),
+		tools.NewSearchCode(ws),
+		tools.NewRunShell(ws),
 	)
 	if cfg.TavilyAPIKey != "" {
 		toolReg.Register(tools.NewWebSearch(cfg.TavilyAPIKey))

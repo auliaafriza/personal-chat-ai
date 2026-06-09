@@ -16,12 +16,19 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o bin/server ./cmd/serve
 # --- Runtime stage ---
 FROM alpine:3.21
 
-# ca-certificates for TLS (Groq API, Neon Postgres over SSL)
-RUN apk add --no-cache ca-certificates tzdata
+# ca-certificates for TLS (Groq API, Neon Postgres over SSL).
+# tzdata untuk get_current_time tool (time.LoadLocation untuk Asia/Jakarta dll).
+# git untuk run_shell tool (read-only allowlist: log/status/diff/show/branch/ls-files/blame).
+RUN apk add --no-cache ca-certificates tzdata git
 
 WORKDIR /app
 
 COPY --from=builder /app/bin/server ./server
+
+# Workspace volume mount point — Railway: attach Volume di /data.
+# Coding tools (Minggu 8) bikin per-user folder di sini.
+RUN mkdir -p /data/workspaces
+ENV WORKSPACE_ROOT=/data/workspaces
 
 EXPOSE 8080
 
