@@ -259,13 +259,23 @@ func (g *Groq) Stream(ctx context.Context, req StreamRequest, sw *stream.Writer)
 
 	// Emit ToolCall frame untuk setiap completed tool call BEFORE returning.
 	// Tools belum di-execute di sini; caller eksekusi setelah Stream return.
+	//
+	// PENTING: AI SDK v4 expect args sebagai JSON object yang valid. Kalau Groq
+	// kirim arguments string kosong (sering terjadi kalau semua params tool
+	// optional — mis. list_directory dipanggil tanpa path), atau kalau parsing
+	// gagal, kita HARUS fallback ke `{}` agar frame `9:` JSON-valid. Tanpa ini,
+	// json.RawMessage("") → JSON broken → AI SDK parser di FE crash → toast
+	// "Gagal mengirim pesan" muncul walau tool sebenarnya jalan normal.
 	for _, tc := range completedCalls {
 		_ = tc.ParseArguments() // populate tc.Parsed (best-effort)
 		var argsForFE any
-		if tc.Parsed != nil {
+		switch {
+		case tc.Parsed != nil:
 			argsForFE = tc.Parsed
-		} else {
+		case tc.Arguments != "" && json.Valid([]byte(tc.Arguments)):
 			argsForFE = json.RawMessage(tc.Arguments)
+		default:
+			argsForFE = map[string]any{} // empty/invalid → safe default
 		}
 		if err := sw.ToolCall(tc.ID, tc.Name, argsForFE); err != nil {
 			return StreamResult{}, fmt.Errorf("write tool_call: %w", err)
