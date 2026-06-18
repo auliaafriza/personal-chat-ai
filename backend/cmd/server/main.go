@@ -53,6 +53,7 @@ func run() error {
 	msgRepo := db.NewMessageRepo(pool)
 	userRepo := db.NewUserRepo(pool)
 	docRepo := db.NewDocumentRepo(pool)
+	taskRepo := db.NewTaskRepo(pool)
 
 	// Services
 	anthropicSvc := service.NewGroq(cfg.GroqAPIKey)
@@ -67,7 +68,7 @@ func run() error {
 	}
 	log.Printf("✓ Workspace root: %s", ws.Root())
 
-	// Tool registry (Minggu 7 + 8).
+	// Tool registry (Minggu 7 + 8 + 9).
 	toolReg := tools.NewRegistry(
 		// Generic tools (Minggu 7)
 		tools.NewCalculator(),
@@ -79,6 +80,19 @@ func run() error {
 		tools.NewListDirectory(ws),
 		tools.NewSearchCode(ws),
 		tools.NewRunShell(ws),
+		// Task tools (Minggu 9)
+		tools.NewCreateTask(taskRepo),
+		tools.NewListTasks(taskRepo),
+		tools.NewCompleteTask(taskRepo),
+		tools.NewDeleteTask(taskRepo),
+		tools.NewRemindMe(taskRepo),
+		// Google productivity tools (Minggu 9)
+		tools.NewListCalendarEvents(),
+		tools.NewCreateCalendarEvent(),
+		tools.NewUpdateCalendarEvent(),
+		tools.NewDeleteCalendarEvent(),
+		tools.NewSearchGmail(),
+		tools.NewReadGmailMessage(),
 	)
 	if cfg.TavilyAPIKey != "" {
 		toolReg.Register(tools.NewWebSearch(cfg.TavilyAPIKey))
@@ -95,6 +109,7 @@ func run() error {
 	chatH := handler.NewChatHandler(convRepo, msgRepo, docRepo, anthropicSvc, retriever, toolReg)
 	meH := handler.NewMeHandler(userRepo)
 	docH := handler.NewDocumentHandler(docRepo, embedder, retriever)
+	taskH := handler.NewTaskHandler(taskRepo)
 
 	// Middleware
 	authMw := appmw.Auth(cfg.AuthSecret, userRepo)
@@ -151,6 +166,14 @@ func run() error {
 				r.Get("/", docH.Get)
 				r.Delete("/", docH.Delete)
 			})
+		})
+
+		// Tasks (Minggu 9)
+		r.Route("/tasks", func(r chi.Router) {
+			r.Get("/", taskH.List)
+			r.Post("/", taskH.Create)
+			r.Patch("/{id}", taskH.Update)
+			r.Delete("/{id}", taskH.Delete)
 		})
 	})
 

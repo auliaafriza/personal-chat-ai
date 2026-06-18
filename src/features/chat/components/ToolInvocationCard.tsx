@@ -2,17 +2,29 @@
 
 import type { ToolInvocation } from "ai"
 import {
+  Bell,
   Calculator,
+  Calendar,
+  CalendarPlus,
+  CalendarX,
+  CheckCircle2,
+  CheckSquare,
   ChevronDown,
   Clock,
   FileEdit,
   FileText,
   FolderOpen,
   Globe,
+  Inbox,
+  ListTodo,
   Loader2,
   type LucideIcon,
+  Mail,
+  PenLine,
+  Plus,
   Search,
   Terminal,
+  Trash2,
   Wrench,
 } from "lucide-react"
 import { useState } from "react"
@@ -51,10 +63,39 @@ function metaFor(toolName: string, args: unknown): ToolMeta {
       return { Icon: Search, label: `Search code: /${truncate(String(a.pattern ?? ""), 50)}/` }
     case "run_shell":
       return { Icon: Terminal, label: `Shell: ${truncate(String(a.command ?? ""), 60)}` }
+    // Tasks (Minggu 9)
+    case "create_task":
+      return { Icon: Plus, label: `Buat task: "${truncate(String(a.title ?? ""), 50)}"` }
+    case "list_tasks":
+      return { Icon: ListTodo, label: "Lihat task list" }
+    case "complete_task":
+      return { Icon: CheckCircle2, label: "Tandai task selesai" }
+    case "delete_task":
+      return { Icon: Trash2, label: "Hapus task" }
+    case "remind_me":
+      return { Icon: Bell, label: `Reminder: "${truncate(String(a.title ?? ""), 50)}"` }
+    // Calendar
+    case "list_calendar_events":
+      return { Icon: Calendar, label: "Lihat kalender" }
+    case "create_calendar_event":
+      return { Icon: CalendarPlus, label: `Buat event: "${truncate(String(a.summary ?? ""), 50)}"` }
+    case "update_calendar_event":
+      return { Icon: PenLine, label: "Update event kalender" }
+    case "delete_calendar_event":
+      return { Icon: CalendarX, label: "Hapus event kalender" }
+    // Gmail
+    case "search_gmail":
+      return { Icon: Inbox, label: `Cari Gmail: "${truncate(String(a.query ?? ""), 50)}"` }
+    case "read_gmail_message":
+      return { Icon: Mail, label: "Baca email" }
     default:
       return { Icon: Wrench, label: `Tool: ${toolName}` }
   }
 }
+
+// suppress unused — CheckSquare is reserved for future status filter icon
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _unused = CheckSquare
 
 function truncate(s: string, n: number): string {
   if (s.length <= n) return s
@@ -212,6 +253,70 @@ function ToolResultRenderer({ toolName, result }: { toolName: string; result: un
                 {String(res.title)}
               </a>
               <p className="text-muted-foreground">{String(res.snippet)}</p>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+    case "list_tasks": {
+      const tasks = (r.tasks ?? []) as Array<Record<string, unknown>>
+      if (tasks.length === 0) {
+        return <p className="text-muted-foreground">Nggak ada task.</p>
+      }
+      return (
+        <ul className="space-y-1">
+          {tasks.slice(0, 20).map((t, i) => (
+            <li key={i} className="flex items-center gap-2">
+              {t.completed ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <ListTodo className="h-3 w-3 text-muted-foreground" />}
+              <span className={t.completed ? "text-muted-foreground line-through" : ""}>{String(t.title)}</span>
+              {t.dueDate ? (
+                <span className="text-[10px] text-muted-foreground">· {String(t.dueDate).slice(0, 16)}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )
+    }
+    case "list_calendar_events": {
+      const events = (r.events ?? []) as Array<Record<string, unknown>>
+      if (events.length === 0) {
+        return <p className="text-muted-foreground">Nggak ada event di range ini.</p>
+      }
+      return (
+        <ul className="space-y-1.5">
+          {events.map((ev, i) => (
+            <li key={i}>
+              <a
+                href={String(ev.htmlLink ?? "#")}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium hover:underline"
+              >
+                {String(ev.summary)}
+              </a>
+              <p className="text-[11px] text-muted-foreground">
+                {String(ev.start).slice(0, 16)} → {String(ev.end).slice(0, 16)}
+                {ev.location ? ` · ${String(ev.location)}` : ""}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+    case "search_gmail": {
+      const messages = (r.messages ?? []) as Array<Record<string, unknown>>
+      if (messages.length === 0) {
+        return <p className="text-muted-foreground">Nggak ada match.</p>
+      }
+      return (
+        <ul className="space-y-1.5">
+          {messages.map((msg, i) => (
+            <li key={i} className="border-b border-border pb-1.5 last:border-0">
+              <p className="font-medium">{String(msg.subject ?? "(no subject)")}</p>
+              <p className="text-[11px] text-muted-foreground">
+                {String(msg.from ?? "")} · {String(msg.date ?? "").slice(0, 25)}
+              </p>
+              <p className="text-muted-foreground">{String(msg.snippet ?? "")}</p>
             </li>
           ))}
         </ul>

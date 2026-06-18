@@ -297,4 +297,15 @@ Allowlist (`run_shell`): `ls cat find grep wc head tail file du tree`, plus `git
 
 Production deployment: Railway needs Volume mount di `/data` supaya workspace files persist. Tanpa volume, files hilang tiap deploy.
 
-Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 8.
+## Productivity Tools (Minggu 9)
+
+11 new tools split jadi 3 groups:
+- **Tasks** (internal DB, table `tasks` migration 006): create_task, list_tasks, complete_task, delete_task, remind_me. Plus REST `/tasks` CRUD untuk FE page.
+- **Calendar** (Google Calendar API): list, create, update, delete events di primary calendar.
+- **Gmail** (read-only): search_gmail, read_gmail_message.
+
+Google access token forwarded dari FE Auth.js via JWT claim `google_access_token`. BE middleware extract via `appmw.GoogleTokenFromCtx(ctx)`. Helper `internal/tools/google_common.go` punya `googleTokenOrError`, `googleGET/POST/PATCH/DELETE` dengan Bearer auth + standard error parsing.
+
+FE auth.ts handle access_token refresh via Google OAuth2 token endpoint (`https://oauth2.googleapis.com/token` with `grant_type=refresh_token`). Required: `access_type=offline + prompt=consent` di authorization params supaya refresh_token guaranteed di-issued.
+
+Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 9.

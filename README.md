@@ -3,7 +3,7 @@
 Chat assistant pribadi untuk dokumen, kode, dan produktivitas.
 Bagian dari [Roadmap AI Engineer](../) — proyek yang bertumbuh tiap minggu.
 
-**Status: Minggu 8 — Coding assistant tools (file ops + safe shell)**
+**Status: Minggu 9 — Productivity tools (Calendar + Gmail + Tasks)**
 
 Architecture: **Next.js FE (Auth.js v5)** ←→ **Go BE (JWT-protected, RAG)** ←→ **Neon Postgres (pgvector)**
 
@@ -222,8 +222,8 @@ Lihat [backend/README.md](./backend/README.md) untuk struktur lengkap.
 - [x] **Minggu 5** — RAG end-to-end (auto-retrieve global) + inline citation [n] + Sources footer + persisted citations
 - [x] **Minggu 6** — Hybrid search (vector + BM25 RRF) + Voyage rerank-2 cross-encoder
 - [x] **Minggu 7** — Tool calling — web_search (Tavily), fetch_url (html→markdown), calculator (expr), get_current_time + multi-turn loop
-- [x] **Minggu 8** — Coding assistant tools — read_file, write_file, list_directory, search_code, run_shell (allowlist) + per-user workspace sandbox + syntax highlight + diff viewer ← **kamu di sini**
-- [ ] **Minggu 9** — Productivity tools (Calendar, Task)
+- [x] **Minggu 8** — Coding assistant tools — read_file, write_file, list_directory, search_code, run_shell (allowlist) + per-user workspace sandbox + syntax highlight + diff viewer
+- [x] **Minggu 9** — Productivity tools — Google Calendar (list/create/update/delete) + Gmail (search/read) + Tasks CRUD + remind_me + /tasks page ← **kamu di sini**
 - [ ] **Minggu 10** — Long-term memory
 - [ ] **Minggu 11** — Evals + observability
 - [ ] **Minggu 12** — Polish, security, showcase
@@ -436,12 +436,50 @@ FE pakai `useChat` yang otomatis populate `message.toolInvocations` dari frames 
 - Local dev: `./tmp/workspaces/` (relative ke `backend/`)
 - Production (Railway): `/data/workspaces` — attach Volume di Railway service supaya file persist across deploy.
 
-## What's Next (Minggu 9 — Productivity tools)
+## Productivity Tools (Minggu 9)
 
-1. Calendar integration (Google Calendar API)
-2. Task management (todo CRUD)
-3. Email summary (Gmail read-only)
-4. Notification scheduler
+**11 tools baru**:
+
+| Group | Tool | Description |
+|---|---|---|
+| Tasks (internal DB) | `create_task` | Title + optional due_date |
+| | `list_tasks` | Filter by status (pending/completed) atau due (overdue/today/upcoming/no_due) |
+| | `complete_task` | Mark done |
+| | `delete_task` | Permanent delete |
+| | `remind_me` | Shortcut: create task dengan is_reminder=true + required due_date |
+| Calendar (Google) | `list_calendar_events` | Range default 7 hari ke depan |
+| | `create_calendar_event` | summary + start + end + optional location/description |
+| | `update_calendar_event` | Partial update |
+| | `delete_calendar_event` | Permanent |
+| Gmail (Google, read-only) | `search_gmail` | Gmail search syntax (e.g. `from:bob@x.com is:unread`) |
+| | `read_gmail_message` | Full body extraction (text/plain preferred, fallback strip-HTML) |
+
+**OAuth scopes baru**:
+- `https://www.googleapis.com/auth/calendar` (Calendar read+write)
+- `https://www.googleapis.com/auth/gmail.readonly` (Gmail read-only)
+
+User HARUS sign out + sign in again setelah upgrade ini (Google OAuth re-consent dialog akan muncul).
+
+**Access token flow**:
+1. Auth.js v5 `jwt` callback simpan access_token + refresh_token + expires_at
+2. Auto-refresh kalau token expiring (1 min buffer) — Google OAuth2 token endpoint
+3. `/api/token` (FE) include `google_access_token` claim di HS256 JWT untuk BE
+4. BE `middleware/auth.go` extract token, inject ke ctx via `GoogleTokenFromCtx`
+5. Tools Calendar/Gmail pakai `googleTokenOrError(ctx, "calendar")` — error explicit kalau missing
+
+**/tasks page**:
+- Filter status + due (chips toggle)
+- Inline form: title + datetime-local for due_date
+- Complete checkbox per item
+- Delete with confirm
+- Auto-invalidate query setelah mutate
+
+## What's Next (Minggu 10 — Long-term memory)
+
+1. Conversation summarization saat conversation panjang
+2. User profile facts extraction (preferences, recurring themes)
+3. Memory retrieval di chat context — selevel di atas RAG (memory dulu, baru documents)
+4. Memory UI untuk lihat/edit/delete
 
 Detail lengkap di [Roadmap doc](https://docs.google.com/document/d/1yNJwtVLvIDWOd37nubd3-IQaeSPgBmbin-lANCMnh28/edit).
 

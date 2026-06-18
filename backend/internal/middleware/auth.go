@@ -20,22 +20,38 @@ import (
 //
 // `sub` (Google's stable user id) dibaca via jwt.RegisteredClaims.Subject —
 // dengan begitu tidak ada konflik tag JSON.
+//
+// GoogleAccessToken (Minggu 9) di-forward dari FE Auth.js session supaya BE
+// bisa pakai Google APIs (Calendar, Gmail) atas nama user. FE handle refresh.
 type Claims struct {
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	Picture string `json:"picture"`
+	Email             string `json:"email"`
+	Name              string `json:"name"`
+	Picture           string `json:"picture"`
+	GoogleAccessToken string `json:"google_access_token,omitempty"`
 	jwt.RegisteredClaims
 }
 
-type ctxKey struct{}
+type ctxKey struct{ name string }
 
-var userCtxKey ctxKey
+var (
+	userCtxKey              = ctxKey{"user"}
+	googleAccessTokenCtxKey = ctxKey{"google_token"}
+)
 
 // UserFromCtx pulls the authenticated user (set by Auth middleware) from ctx.
 // Returns nil if missing — handlers harus treat nil sebagai 401.
 func UserFromCtx(ctx context.Context) *db.User {
 	u, _ := ctx.Value(userCtxKey).(*db.User)
 	return u
+}
+
+// GoogleTokenFromCtx pulls user's Google OAuth access token (forwarded oleh
+// FE Auth.js via JWT claim). Empty kalau user belum grant scopes Calendar/Gmail
+// atau FE belum sukses refresh. Tools Google harus handle empty case dengan
+// pesan error yang jelas, bukan crash.
+func GoogleTokenFromCtx(ctx context.Context) string {
+	tok, _ := ctx.Value(googleAccessTokenCtxKey).(string)
+	return tok
 }
 
 // Auth returns a chi middleware that validates a Bearer JWT (HS256 / AUTH_SECRET),
@@ -79,6 +95,9 @@ func Auth(secret string, users *db.UserRepo) func(http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(r.Context(), userCtxKey, &user)
+			if claims.GoogleAccessToken != "" {
+				ctx = context.WithValue(ctx, googleAccessTokenCtxKey, claims.GoogleAccessToken)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

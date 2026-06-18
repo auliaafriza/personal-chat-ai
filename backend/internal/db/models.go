@@ -80,6 +80,21 @@ type DocumentChunk struct {
 	CreatedAt  time.Time `json:"createdAt"`
 }
 
+// Task — simple TODO entry (Minggu 9). Bisa juga reminder (is_reminder=true)
+// yang dibuat via remind_me tool.
+type Task struct {
+	ID          string     `json:"id"`
+	UserID      string     `json:"userId"`
+	Title       string     `json:"title"`
+	Description string     `json:"description"`
+	DueDate     *time.Time `json:"dueDate"`
+	IsReminder  bool       `json:"isReminder"`
+	Completed   bool       `json:"completed"`
+	CompletedAt *time.Time `json:"completedAt"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+}
+
 // SearchResult — DocumentChunk + scoring breakdown.
 //
 // Field-field scoring (Minggu 6 hybrid + rerank):
