@@ -308,4 +308,12 @@ Google access token forwarded dari FE Auth.js via JWT claim `google_access_token
 
 FE auth.ts handle access_token refresh via Google OAuth2 token endpoint (`https://oauth2.googleapis.com/token` with `grant_type=refresh_token`). Required: `access_type=offline + prompt=consent` di authorization params supaya refresh_token guaranteed di-issued.
 
-Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 9.
+## Long-term Memory (Minggu 10)
+
+Per-user persistent facts disimpan di `user_memories` (migration 007) dengan vector(512) embedding pakai Voyage. 3 tools (`remember_this`, `update_memory`, `forget_memory`) + REST CRUD `/memories`.
+
+Chat handler inject top-3 memory di system prompt sebelum RAG context — order: base prompt → memory → docs → tool rules. Threshold `0.20` (lebih rendah dari RAG karena memori lebih personal/varied). Skip embedding call kalau `CountByUser == 0` untuk hemat token.
+
+Memory retrieval lebih sederhana dari RAG: cuma cosine vector (no BM25, no rerank). Memori pendek (1-2 kalimat per fact), sehingga vector cukup akurat.
+
+Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 10.

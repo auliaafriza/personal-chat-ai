@@ -18,29 +18,35 @@ import (
 )
 
 type ChatHandler struct {
-	convRepo  *db.ConversationRepo
-	msgRepo   *db.MessageRepo
-	docRepo   *db.DocumentRepo
-	ai        *service.Anthropic
-	retriever *service.Retriever
-	tools     *tools.Registry
+	convRepo    *db.ConversationRepo
+	msgRepo     *db.MessageRepo
+	docRepo     *db.DocumentRepo
+	memoryRepo  *db.MemoryRepo
+	ai          *service.Anthropic
+	retriever   *service.Retriever
+	embedder    *service.Embedder
+	tools       *tools.Registry
 }
 
 func NewChatHandler(
 	convRepo *db.ConversationRepo,
 	msgRepo *db.MessageRepo,
 	docRepo *db.DocumentRepo,
+	memoryRepo *db.MemoryRepo,
 	ai *service.Anthropic,
 	retriever *service.Retriever,
+	embedder *service.Embedder,
 	toolReg *tools.Registry,
 ) *ChatHandler {
 	return &ChatHandler{
-		convRepo:  convRepo,
-		msgRepo:   msgRepo,
-		docRepo:   docRepo,
-		ai:        ai,
-		retriever: retriever,
-		tools:     toolReg,
+		convRepo:   convRepo,
+		msgRepo:    msgRepo,
+		docRepo:    docRepo,
+		memoryRepo: memoryRepo,
+		ai:         ai,
+		retriever:  retriever,
+		embedder:   embedder,
+		tools:      toolReg,
 	}
 }
 
@@ -50,6 +56,12 @@ const (
 	ragTopK                = 5
 	ragSimilarityThreshold = 0.10
 	ragSnippetMaxChars     = 300
+)
+
+// Memory tuning (Minggu 10).
+const (
+	memoryTopK                = 3
+	memorySimilarityThreshold = 0.20
 )
 
 // Tool loop tuning (Minggu 7).
@@ -124,8 +136,16 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		temperature = conv.Temperature
 	}
 
-	// --- RAG: retrieve relevant chunks (Minggu 5/6) ---
+	// --- Memory: retrieve top-N personal facts (Minggu 10) ---
+	// Inject DULU sebelum RAG context biar urutan system prompt:
+	//   base prompt → memory (personalisasi) → docs (knowledge) → instructions
 	latestUser := latestUserMessage(body.Messages)
+	memoryBlock := h.retrieveMemoryBlock(ctx, user.ID, latestUser)
+	if memoryBlock != "" {
+		systemPrompt = augmentMemoryPrompt(systemPrompt, memoryBlock)
+	}
+
+	// --- RAG: retrieve relevant chunks (Minggu 5/6) ---
 	sources := h.retrieve(ctx, user.ID, latestUser)
 	if len(sources.list) > 0 {
 		systemPrompt = augmentSystemPrompt(systemPrompt, sources.contextBlock)
@@ -344,6 +364,58 @@ func augmentSystemPrompt(base, contextBlock string) string {
 		"- Kalau konteks di atas relevan dengan pertanyaan, gunakan untuk menjawab dan WAJIB cite dengan format [n] (n = nomor sumber dalam kurung siku) tepat setelah klaim yang relevan.\n" +
 		"- Kalau konteks TIDAK relevan dengan pertanyaan, abaikan saja dan jawab normal tanpa citation.\n" +
 		"- JANGAN mengarang nomor citation atau merujuk sumber yang tidak ada.\n"
+}
+
+// augmentMemoryPrompt inject long-term memory facts ke awal system prompt.
+// Posisinya: setelah base prompt, sebelum RAG context (kalau ada).
+func augmentMemoryPrompt(base, memoryBlock string) string {
+	return base + "\n\n---\n\n" +
+		"LONG-TERM MEMORY (fakta tersimpan tentang user — auto-retrieved):\n\n" +
+		memoryBlock +
+		"INSTRUKSI MEMORY:\n" +
+		"- Pakai memory ini sebagai background context tentang user.\n" +
+		"- JANGAN ulangi memory kembali ke user secara verbatim kecuali ditanya.\n" +
+		"- Kalau memory bertentangan dengan pesan user yang baru, prioritaskan yang baru.\n"
+}
+
+// retrieveMemoryBlock: embed latest user message, retrieve top-N memories,
+// filter threshold, format jadi block teks untuk inject ke system prompt.
+// Graceful: gagal di mana pun = return empty string, chat tetap jalan.
+func (h *ChatHandler) retrieveMemoryBlock(ctx context.Context, userID, query string) string {
+	if strings.TrimSpace(query) == "" {
+		return ""
+	}
+
+	// Skip embedding call kalau user belum punya memory sama sekali.
+	count, err := h.memoryRepo.CountByUser(ctx, userID)
+	if err != nil || count == 0 {
+		return ""
+	}
+
+	emb, err := h.embedder.EmbedQuery(ctx, query)
+	if err != nil {
+		log.Printf("[Memory] embed query: %v", err)
+		return ""
+	}
+
+	memories, err := h.memoryRepo.SearchSimilar(ctx, userID, emb, memoryTopK)
+	if err != nil {
+		log.Printf("[Memory] search: %v", err)
+		return ""
+	}
+
+	var block strings.Builder
+	for _, m := range memories {
+		if m.Similarity < memorySimilarityThreshold {
+			continue
+		}
+		fmt.Fprintf(&block, "- [%s] %s\n", m.Category, m.Content)
+	}
+	out := block.String()
+	if out == "" {
+		return ""
+	}
+	return out + "\n"
 }
 
 func latestUserMessage(msgs []aiSdkMessage) string {

@@ -3,7 +3,7 @@
 Chat assistant pribadi untuk dokumen, kode, dan produktivitas.
 Bagian dari [Roadmap AI Engineer](../) — proyek yang bertumbuh tiap minggu.
 
-**Status: Minggu 9 — Productivity tools (Calendar + Gmail + Tasks)**
+**Status: Minggu 10 — Long-term memory**
 
 Architecture: **Next.js FE (Auth.js v5)** ←→ **Go BE (JWT-protected, RAG)** ←→ **Neon Postgres (pgvector)**
 
@@ -223,8 +223,8 @@ Lihat [backend/README.md](./backend/README.md) untuk struktur lengkap.
 - [x] **Minggu 6** — Hybrid search (vector + BM25 RRF) + Voyage rerank-2 cross-encoder
 - [x] **Minggu 7** — Tool calling — web_search (Tavily), fetch_url (html→markdown), calculator (expr), get_current_time + multi-turn loop
 - [x] **Minggu 8** — Coding assistant tools — read_file, write_file, list_directory, search_code, run_shell (allowlist) + per-user workspace sandbox + syntax highlight + diff viewer
-- [x] **Minggu 9** — Productivity tools — Google Calendar (list/create/update/delete) + Gmail (search/read) + Tasks CRUD + remind_me + /tasks page ← **kamu di sini**
-- [ ] **Minggu 10** — Long-term memory
+- [x] **Minggu 9** — Productivity tools — Google Calendar (list/create/update/delete) + Gmail (search/read) + Tasks CRUD + remind_me + /tasks page
+- [x] **Minggu 10** — Long-term memory — remember_this/update_memory/forget_memory tools + per-user embeddings + auto-inject top-3 di system prompt + /memory page (categories + search) ← **kamu di sini**
 - [ ] **Minggu 11** — Evals + observability
 - [ ] **Minggu 12** — Polish, security, showcase
 
@@ -474,12 +474,47 @@ User HARUS sign out + sign in again setelah upgrade ini (Google OAuth re-consent
 - Delete with confirm
 - Auto-invalidate query setelah mutate
 
-## What's Next (Minggu 10 — Long-term memory)
+## Long-term Memory (Minggu 10)
 
-1. Conversation summarization saat conversation panjang
-2. User profile facts extraction (preferences, recurring themes)
-3. Memory retrieval di chat context — selevel di atas RAG (memory dulu, baru documents)
-4. Memory UI untuk lihat/edit/delete
+**Konsep**: Memory = persistent facts tentang user yang auto-injected ke setiap chat untuk personalisasi. Bedanya dari Documents (Minggu 4): lebih pendek, lebih personal, selalu top-3 (bukan threshold-gated).
+
+**3 tools baru** (semua user-scoped via ctx):
+
+| Tool | Description |
+|---|---|
+| `remember_this` | Save fact + auto-embed pakai Voyage. Category opsional (preferences/profile/work/projects/goals/general). |
+| `update_memory` | Edit content (re-embed) atau category by ID. |
+| `forget_memory` | Permanent delete by ID. |
+
+**Chat injection order** (di system prompt):
+```
+1. Base prompt          (identitas + global instructions)
+2. LONG-TERM MEMORY     (top-3 facts retrieved by cosine similarity — Minggu 10)
+3. KONTEKS DOKUMEN      (top-5 chunks hybrid+rerank — Minggu 5/6)
+4. Tool calling rules   (built-in di Groq function calling)
+```
+
+**Implementation**:
+- Table `user_memories` (migration 007): id, user_id, content, category, embedding vector(512), source_conversation_id, timestamps
+- HNSW cosine index untuk fast retrieval
+- Chat handler: embed user message → SearchSimilar top-3 → filter `similarity >= 0.20` → format jadi block → augment system prompt sebelum RAG
+- Graceful: gagal di mana pun (no memories / embed fail / search fail) → chat tetap jalan tanpa memory injection
+
+**/memory page**:
+- List grouped by category dengan section headers
+- Search bar (substring match, debounced 300ms)
+- Category filter (select)
+- Inline add (textarea + category select)
+- Edit-in-place
+- Delete dengan confirm
+- Link to source conversation kalau memory dibuat dari chat
+
+## What's Next (Minggu 11 — Evals + observability)
+
+1. Eval harness: query set + expected docs/citations untuk hitung recall@k, MRR
+2. Tracing: log tiap chat request dengan timing breakdown (retrieve, embed, stream, tool)
+3. Metrics dashboard sederhana (response time p50/p95, tool usage frequency, error rate)
+4. Conversation quality scoring (LLM-as-judge)
 
 Detail lengkap di [Roadmap doc](https://docs.google.com/document/d/1yNJwtVLvIDWOd37nubd3-IQaeSPgBmbin-lANCMnh28/edit).
 

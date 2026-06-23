@@ -80,6 +80,19 @@ type DocumentChunk struct {
 	CreatedAt  time.Time `json:"createdAt"`
 }
 
+// Memory — persistent user fact (Minggu 10). Di-embed pakai Voyage dan
+// di-retrieve di setiap chat untuk personalisasi.
+type Memory struct {
+	ID                   string    `json:"id"`
+	UserID               string    `json:"userId"`
+	Content              string    `json:"content"`
+	Category             string    `json:"category"`
+	SourceConversationID *string   `json:"sourceConversationId,omitempty"`
+	Similarity           float64   `json:"similarity,omitempty"` // hanya terisi saat search
+	CreatedAt            time.Time `json:"createdAt"`
+	UpdatedAt            time.Time `json:"updatedAt"`
+}
+
 // Task — simple TODO entry (Minggu 9). Bisa juga reminder (is_reminder=true)
 // yang dibuat via remind_me tool.
 type Task struct {

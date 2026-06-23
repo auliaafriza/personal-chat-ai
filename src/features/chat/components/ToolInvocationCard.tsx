@@ -3,6 +3,8 @@
 import type { ToolInvocation } from "ai"
 import {
   Bell,
+  Brain,
+  BrainCircuit,
   Calculator,
   Calendar,
   CalendarPlus,
@@ -11,6 +13,7 @@ import {
   CheckSquare,
   ChevronDown,
   Clock,
+  Eraser,
   FileEdit,
   FileText,
   FolderOpen,
@@ -88,6 +91,13 @@ function metaFor(toolName: string, args: unknown): ToolMeta {
       return { Icon: Inbox, label: `Cari Gmail: "${truncate(String(a.query ?? ""), 50)}"` }
     case "read_gmail_message":
       return { Icon: Mail, label: "Baca email" }
+    // Memory (Minggu 10)
+    case "remember_this":
+      return { Icon: Brain, label: `Ingat: "${truncate(String(a.content ?? ""), 50)}"` }
+    case "forget_memory":
+      return { Icon: Eraser, label: "Lupakan memory" }
+    case "update_memory":
+      return { Icon: BrainCircuit, label: "Update memory" }
     default:
       return { Icon: Wrench, label: `Tool: ${toolName}` }
   }

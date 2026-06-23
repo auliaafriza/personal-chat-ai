@@ -1,7 +1,7 @@
 "use client"
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
-import { CheckSquare, FileText, LogOut, Settings, Sun, Moon } from "lucide-react"
+import { Brain, CheckSquare, FileText, LogOut, Settings, Sun, Moon } from "lucide-react"
 import { signOut, useSession } from "next-auth/react"
 import { useTheme } from "next-themes"
 import Link from "next/link"
@@ -71,6 +71,16 @@ export function UserMenu() {
             >
               <CheckSquare className="h-4 w-4" />
               Tasks
+            </Link>
+          </DropdownMenu.Item>
+
+          <DropdownMenu.Item asChild>
+            <Link
+              href="/memory"
+              className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent focus:text-accent-foreground"
+            >
+              <Brain className="h-4 w-4" />
+              Memory
             </Link>
           </DropdownMenu.Item>
 

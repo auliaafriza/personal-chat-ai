@@ -54,6 +54,7 @@ func run() error {
 	userRepo := db.NewUserRepo(pool)
 	docRepo := db.NewDocumentRepo(pool)
 	taskRepo := db.NewTaskRepo(pool)
+	memoryRepo := db.NewMemoryRepo(pool)
 
 	// Services
 	anthropicSvc := service.NewGroq(cfg.GroqAPIKey)
@@ -93,6 +94,10 @@ func run() error {
 		tools.NewDeleteCalendarEvent(),
 		tools.NewSearchGmail(),
 		tools.NewReadGmailMessage(),
+		// Memory tools (Minggu 10)
+		tools.NewRememberThis(memoryRepo, embedder),
+		tools.NewForgetMemory(memoryRepo),
+		tools.NewUpdateMemoryTool(memoryRepo, embedder),
 	)
 	if cfg.TavilyAPIKey != "" {
 		toolReg.Register(tools.NewWebSearch(cfg.TavilyAPIKey))
@@ -106,10 +111,11 @@ func run() error {
 	convH := handler.NewConversationHandler(convRepo)
 	msgH := handler.NewMessageHandler(msgRepo, convRepo)
 	titleH := handler.NewTitleHandler(convRepo, msgRepo, anthropicSvc)
-	chatH := handler.NewChatHandler(convRepo, msgRepo, docRepo, anthropicSvc, retriever, toolReg)
+	chatH := handler.NewChatHandler(convRepo, msgRepo, docRepo, memoryRepo, anthropicSvc, retriever, embedder, toolReg)
 	meH := handler.NewMeHandler(userRepo)
 	docH := handler.NewDocumentHandler(docRepo, embedder, retriever)
 	taskH := handler.NewTaskHandler(taskRepo)
+	memoryH := handler.NewMemoryHandler(memoryRepo, embedder)
 
 	// Middleware
 	authMw := appmw.Auth(cfg.AuthSecret, userRepo)
@@ -174,6 +180,14 @@ func run() error {
 			r.Post("/", taskH.Create)
 			r.Patch("/{id}", taskH.Update)
 			r.Delete("/{id}", taskH.Delete)
+		})
+
+		// Memories (Minggu 10)
+		r.Route("/memories", func(r chi.Router) {
+			r.Get("/", memoryH.List)
+			r.Post("/", memoryH.Create)
+			r.Patch("/{id}", memoryH.Update)
+			r.Delete("/{id}", memoryH.Delete)
 		})
 	})
 
