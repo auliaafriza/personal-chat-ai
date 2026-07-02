@@ -80,6 +80,59 @@ type DocumentChunk struct {
 	CreatedAt  time.Time `json:"createdAt"`
 }
 
+// TraceSpan — single stage timing within a chat request.
+type TraceSpan struct {
+	Stage      string         `json:"stage"` // memory_retrieve | rag_retrieve | llm_stream | tool_exec
+	DurationMs int64          `json:"duration_ms"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+}
+
+// ChatTrace — one row per chat request with aggregated metrics + inline spans.
+type ChatTrace struct {
+	ID               string      `json:"id"`
+	UserID           string      `json:"userId"`
+	ConversationID   *string     `json:"conversationId,omitempty"`
+	Model            string      `json:"model"`
+	TotalDurationMs  int64       `json:"totalDurationMs"`
+	PromptTokens     int         `json:"promptTokens"`
+	CompletionTokens int         `json:"completionTokens"`
+	MemoryCount      int         `json:"memoryCount"`
+	SourcesCount     int         `json:"sourcesCount"`
+	ToolCallsCount   int         `json:"toolCallsCount"`
+	Error            *string     `json:"error,omitempty"`
+	Spans            []TraceSpan `json:"spans"`
+	CreatedAt        time.Time   `json:"createdAt"`
+}
+
+// EvalSet — user-created golden query set for retrieval eval.
+type EvalSet struct {
+	ID          string           `json:"id"`
+	UserID      string           `json:"userId"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Queries     []EvalSetQuery   `json:"queries"`
+	CreatedAt   time.Time        `json:"createdAt"`
+	UpdatedAt   time.Time        `json:"updatedAt"`
+}
+
+type EvalSetQuery struct {
+	Query               string   `json:"query"`
+	ExpectedDocumentIDs []string `json:"expectedDocumentIds"`
+	Notes               string   `json:"notes,omitempty"`
+}
+
+// EvalRun — one row per eval execution.
+type EvalRun struct {
+	ID               string         `json:"id"`
+	UserID           string         `json:"userId"`
+	Kind             string         `json:"kind"` // "retrieval" | "judge"
+	EvalSetID        *string        `json:"evalSetId,omitempty"`
+	SubjectMessageID *string        `json:"subjectMessageId,omitempty"`
+	Results          map[string]any `json:"results"`
+	DurationMs       int64          `json:"durationMs"`
+	CreatedAt        time.Time      `json:"createdAt"`
+}
+
 // Memory — persistent user fact (Minggu 10). Di-embed pakai Voyage dan
 // di-retrieve di setiap chat untuk personalisasi.
 type Memory struct {

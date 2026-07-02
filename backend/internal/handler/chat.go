@@ -8,24 +8,27 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/auliaafriza/personalgpt-backend/internal/db"
 	appmw "github.com/auliaafriza/personalgpt-backend/internal/middleware"
 	"github.com/auliaafriza/personalgpt-backend/internal/service"
 	"github.com/auliaafriza/personalgpt-backend/internal/stream"
 	"github.com/auliaafriza/personalgpt-backend/internal/tools"
+	"github.com/auliaafriza/personalgpt-backend/internal/tracing"
 	"github.com/auliaafriza/personalgpt-backend/internal/workspace"
 )
 
 type ChatHandler struct {
-	convRepo    *db.ConversationRepo
-	msgRepo     *db.MessageRepo
-	docRepo     *db.DocumentRepo
-	memoryRepo  *db.MemoryRepo
-	ai          *service.Anthropic
-	retriever   *service.Retriever
-	embedder    *service.Embedder
-	tools       *tools.Registry
+	convRepo   *db.ConversationRepo
+	msgRepo    *db.MessageRepo
+	docRepo    *db.DocumentRepo
+	memoryRepo *db.MemoryRepo
+	traceRepo  *db.TraceRepo
+	ai         *service.Anthropic
+	retriever  *service.Retriever
+	embedder   *service.Embedder
+	tools      *tools.Registry
 }
 
 func NewChatHandler(
@@ -33,6 +36,7 @@ func NewChatHandler(
 	msgRepo *db.MessageRepo,
 	docRepo *db.DocumentRepo,
 	memoryRepo *db.MemoryRepo,
+	traceRepo *db.TraceRepo,
 	ai *service.Anthropic,
 	retriever *service.Retriever,
 	embedder *service.Embedder,
@@ -43,6 +47,7 @@ func NewChatHandler(
 		msgRepo:    msgRepo,
 		docRepo:    docRepo,
 		memoryRepo: memoryRepo,
+		traceRepo:  traceRepo,
 		ai:         ai,
 		retriever:  retriever,
 		embedder:   embedder,
@@ -102,6 +107,9 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// resolve per-user sandbox path tanpa di-pass eksplisit.
 	ctx := workspace.WithUser(r.Context(), user.ID)
 
+	// Tracer (Minggu 11): collect spans + counters, persist async di akhir.
+	tr := tracing.NewTracer()
+
 	// Default ke user settings, lalu override pakai conversation settings.
 	model := user.DefaultModel
 	if model == "" || strings.HasPrefix(model, "claude-") {
@@ -140,13 +148,19 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Inject DULU sebelum RAG context biar urutan system prompt:
 	//   base prompt → memory (personalisasi) → docs (knowledge) → instructions
 	latestUser := latestUserMessage(body.Messages)
-	memoryBlock := h.retrieveMemoryBlock(ctx, user.ID, latestUser)
+	memSpan := tr.Start("memory_retrieve")
+	memoryBlock, memoryCount := h.retrieveMemoryBlock(ctx, user.ID, latestUser)
+	memSpan.SetMeta("count", memoryCount).Finish()
+	tr.SetMemoryCount(memoryCount)
 	if memoryBlock != "" {
 		systemPrompt = augmentMemoryPrompt(systemPrompt, memoryBlock)
 	}
 
 	// --- RAG: retrieve relevant chunks (Minggu 5/6) ---
+	ragSpan := tr.Start("rag_retrieve")
 	sources := h.retrieve(ctx, user.ID, latestUser)
+	ragSpan.SetMeta("count", len(sources.list)).Finish()
+	tr.SetSourcesCount(len(sources.list))
 	if len(sources.list) > 0 {
 		systemPrompt = augmentSystemPrompt(systemPrompt, sources.contextBlock)
 	}
@@ -204,6 +218,7 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	)
 
 	for iter := 0; iter < maxToolIterations; iter++ {
+		llmSpan := tr.Start("llm_stream").SetMeta("iter", iter)
 		res, err := h.ai.Stream(ctx, service.StreamRequest{
 			Model:        model,
 			SystemPrompt: systemPrompt,
@@ -211,13 +226,20 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			Turns:        turns,
 			Tools:        toolSchemas,
 		}, sw)
+		llmSpan.SetMeta("finish_reason", res.FinishReason).
+			SetMeta("prompt_tokens", res.Usage.PromptTokens).
+			SetMeta("completion_tokens", res.Usage.CompletionTokens).
+			Finish()
 		if err != nil {
 			log.Printf("[Chat] stream iter %d: %v", iter, err)
+			tr.SetError(err.Error())
+			h.persistTrace(tr, user.ID, model, conversationIDForTrace(body.ConversationID))
 			return
 		}
 
 		accumulatedText.WriteString(res.Text)
 		finalUsage = res.Usage
+		tr.AddTokens(res.Usage.PromptTokens, res.Usage.CompletionTokens)
 
 		// Tutup LLM step ini dengan `e:` (step finish) — WAJIB sebelum tool
 		// results (`a:`) atau next iter, supaya AI SDK v4 parser di FE bisa
@@ -242,8 +264,12 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			ToolCalls: res.ToolCalls,
 		})
 
+		tr.IncrToolCalls(len(res.ToolCalls))
 		for _, tc := range res.ToolCalls {
+			toolSpan := tr.Start("tool_exec").SetMeta("tool", tc.Name)
 			result := h.executeTool(ctx, tc)
+			toolSpan.Finish()
+
 			if err := sw.ToolResult(tc.ID, result); err != nil {
 				log.Printf("[Chat] write tool_result: %v", err)
 			}
@@ -278,6 +304,34 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[Chat] touch conversation: %v", err)
 		}
 	}
+
+	// Persist trace async (jangan block response ke user).
+	h.persistTrace(tr, user.ID, model, conversationIDForTrace(body.ConversationID))
+	// Silence unused-variable warning for finalUsage kalau linter marah.
+	_ = finalUsage
+}
+
+// persistTrace saves trace di background. Pakai context.Background() supaya
+// nggak ke-cancel saat request ctx selesai.
+func (h *ChatHandler) persistTrace(tr *tracing.Tracer, userID, model string, conversationID *string) {
+	if h.traceRepo == nil {
+		return
+	}
+	snap := tr.Snapshot(userID, model, conversationID)
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := h.traceRepo.Save(bgCtx, snap); err != nil {
+			log.Printf("[Trace] save failed: %v", err)
+		}
+	}()
+}
+
+func conversationIDForTrace(id string) *string {
+	if id == "" {
+		return nil
+	}
+	return &id
 }
 
 // executeTool runs one tool call dan return result (atau error wrapper).
@@ -380,42 +434,46 @@ func augmentMemoryPrompt(base, memoryBlock string) string {
 
 // retrieveMemoryBlock: embed latest user message, retrieve top-N memories,
 // filter threshold, format jadi block teks untuk inject ke system prompt.
-// Graceful: gagal di mana pun = return empty string, chat tetap jalan.
-func (h *ChatHandler) retrieveMemoryBlock(ctx context.Context, userID, query string) string {
+// Return (block, effectiveCount). Graceful: gagal di mana pun = empty result.
+func (h *ChatHandler) retrieveMemoryBlock(ctx context.Context, userID, query string) (string, int) {
 	if strings.TrimSpace(query) == "" {
-		return ""
+		return "", 0
 	}
 
 	// Skip embedding call kalau user belum punya memory sama sekali.
 	count, err := h.memoryRepo.CountByUser(ctx, userID)
 	if err != nil || count == 0 {
-		return ""
+		return "", 0
 	}
 
 	emb, err := h.embedder.EmbedQuery(ctx, query)
 	if err != nil {
 		log.Printf("[Memory] embed query: %v", err)
-		return ""
+		return "", 0
 	}
 
 	memories, err := h.memoryRepo.SearchSimilar(ctx, userID, emb, memoryTopK)
 	if err != nil {
 		log.Printf("[Memory] search: %v", err)
-		return ""
+		return "", 0
 	}
 
-	var block strings.Builder
+	var (
+		block strings.Builder
+		used  int
+	)
 	for _, m := range memories {
 		if m.Similarity < memorySimilarityThreshold {
 			continue
 		}
 		fmt.Fprintf(&block, "- [%s] %s\n", m.Category, m.Content)
+		used++
 	}
 	out := block.String()
 	if out == "" {
-		return ""
+		return "", 0
 	}
-	return out + "\n"
+	return out + "\n", used
 }
 
 func latestUserMessage(msgs []aiSdkMessage) string {

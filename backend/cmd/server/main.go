@@ -15,6 +15,7 @@ import (
 
 	"github.com/auliaafriza/personalgpt-backend/internal/config"
 	"github.com/auliaafriza/personalgpt-backend/internal/db"
+	"github.com/auliaafriza/personalgpt-backend/internal/eval"
 	"github.com/auliaafriza/personalgpt-backend/internal/handler"
 	appmw "github.com/auliaafriza/personalgpt-backend/internal/middleware"
 	"github.com/auliaafriza/personalgpt-backend/internal/service"
@@ -55,6 +56,8 @@ func run() error {
 	docRepo := db.NewDocumentRepo(pool)
 	taskRepo := db.NewTaskRepo(pool)
 	memoryRepo := db.NewMemoryRepo(pool)
+	traceRepo := db.NewTraceRepo(pool)
+	evalRepo := db.NewEvalRepo(pool)
 
 	// Services
 	anthropicSvc := service.NewGroq(cfg.GroqAPIKey)
@@ -111,11 +114,17 @@ func run() error {
 	convH := handler.NewConversationHandler(convRepo)
 	msgH := handler.NewMessageHandler(msgRepo, convRepo)
 	titleH := handler.NewTitleHandler(convRepo, msgRepo, anthropicSvc)
-	chatH := handler.NewChatHandler(convRepo, msgRepo, docRepo, memoryRepo, anthropicSvc, retriever, embedder, toolReg)
+	chatH := handler.NewChatHandler(convRepo, msgRepo, docRepo, memoryRepo, traceRepo, anthropicSvc, retriever, embedder, toolReg)
 	meH := handler.NewMeHandler(userRepo)
 	docH := handler.NewDocumentHandler(docRepo, embedder, retriever)
 	taskH := handler.NewTaskHandler(taskRepo)
 	memoryH := handler.NewMemoryHandler(memoryRepo, embedder)
+
+	// Eval (Minggu 11) — retrieval eval reuses shared Retriever; judge pakai Groq small model.
+	retrievalEv := eval.NewRetrievalEvaluator(retriever)
+	judgeEv := eval.NewJudgeEvaluator(anthropicSvc)
+	observabilityH := handler.NewObservabilityHandler(traceRepo)
+	evalH := handler.NewEvalHandler(evalRepo, msgRepo, convRepo, retrievalEv, judgeEv)
 
 	// Middleware
 	authMw := appmw.Auth(cfg.AuthSecret, userRepo)
@@ -188,6 +197,22 @@ func run() error {
 			r.Post("/", memoryH.Create)
 			r.Patch("/{id}", memoryH.Update)
 			r.Delete("/{id}", memoryH.Delete)
+		})
+
+		// Observability + Evals (Minggu 11)
+		r.Route("/observability", func(r chi.Router) {
+			r.Get("/traces", observabilityH.ListTraces)
+			r.Get("/metrics", observabilityH.Metrics)
+		})
+		r.Route("/eval-sets", func(r chi.Router) {
+			r.Get("/", evalH.ListSets)
+			r.Post("/", evalH.CreateSet)
+			r.Delete("/{id}", evalH.DeleteSet)
+		})
+		r.Route("/eval-runs", func(r chi.Router) {
+			r.Get("/", evalH.ListRuns)
+			r.Post("/retrieval", evalH.RunRetrievalEval)
+			r.Post("/judge", evalH.RunJudgeEval)
 		})
 	})
 

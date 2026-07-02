@@ -316,4 +316,23 @@ Chat handler inject top-3 memory di system prompt sebelum RAG context — order:
 
 Memory retrieval lebih sederhana dari RAG: cuma cosine vector (no BM25, no rerank). Memori pendek (1-2 kalimat per fact), sehingga vector cukup akurat.
 
-Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 10.
+## Observability + Evals (Minggu 11)
+
+**Package baru**:
+- `internal/tracing/` — Tracer struct dengan spans + counters. Thread-safe. Snapshot() untuk async persist.
+- `internal/eval/retrieval.go` — RetrievalEvaluator: run golden queries → compute recall@k + MRR + per-query breakdown.
+- `internal/eval/judge.go` — JudgeEvaluator: Groq LLM scores assistant response (faithfulness + helpfulness 1-5) dengan structured JSON output.
+
+**Migration 008** — 3 tables: `chat_traces` (spans JSONB inline), `eval_sets` (queries JSONB), `eval_runs` (results JSONB).
+
+**Chat handler** — di-instrument setiap stage dengan `tr.Start("stage").SetMeta(...).Finish()`. Async persist ke DB pas request selesai (goroutine + 5s timeout supaya nggak leak).
+
+**Endpoints**:
+- `GET /observability/traces?limit=` — recent traces per user
+- `GET /observability/metrics?sample=` — computed metrics dari N recent traces
+- `GET /eval-sets`, `POST /eval-sets`, `DELETE /eval-sets/{id}` — CRUD golden query sets
+- `GET /eval-runs?kind=&evalSetId=` — list runs
+- `POST /eval-runs/retrieval` — trigger retrieval eval (butuh evalSetId)
+- `POST /eval-runs/judge` — trigger judge eval (butuh messageId)
+
+Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 11.

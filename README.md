@@ -3,7 +3,7 @@
 Chat assistant pribadi untuk dokumen, kode, dan produktivitas.
 Bagian dari [Roadmap AI Engineer](../) — proyek yang bertumbuh tiap minggu.
 
-**Status: Minggu 10 — Long-term memory**
+**Status: Minggu 11 — Evals + Observability**
 
 Architecture: **Next.js FE (Auth.js v5)** ←→ **Go BE (JWT-protected, RAG)** ←→ **Neon Postgres (pgvector)**
 
@@ -224,8 +224,8 @@ Lihat [backend/README.md](./backend/README.md) untuk struktur lengkap.
 - [x] **Minggu 7** — Tool calling — web_search (Tavily), fetch_url (html→markdown), calculator (expr), get_current_time + multi-turn loop
 - [x] **Minggu 8** — Coding assistant tools — read_file, write_file, list_directory, search_code, run_shell (allowlist) + per-user workspace sandbox + syntax highlight + diff viewer
 - [x] **Minggu 9** — Productivity tools — Google Calendar (list/create/update/delete) + Gmail (search/read) + Tasks CRUD + remind_me + /tasks page
-- [x] **Minggu 10** — Long-term memory — remember_this/update_memory/forget_memory tools + per-user embeddings + auto-inject top-3 di system prompt + /memory page (categories + search) ← **kamu di sini**
-- [ ] **Minggu 11** — Evals + observability
+- [x] **Minggu 10** — Long-term memory — remember_this/update_memory/forget_memory tools + per-user embeddings + auto-inject top-3 di system prompt + /memory page (categories + search)
+- [x] **Minggu 11** — Evals + observability — In-DB traces per stage + /observability metrics dashboard + retrieval eval (recall@k + MRR) + LLM-as-judge scoring + /evals page ← **kamu di sini**
 - [ ] **Minggu 12** — Polish, security, showcase
 
 ## Conventions
@@ -509,12 +509,33 @@ User HARUS sign out + sign in again setelah upgrade ini (Google OAuth re-consent
 - Delete dengan confirm
 - Link to source conversation kalau memory dibuat dari chat
 
-## What's Next (Minggu 11 — Evals + observability)
+## Observability + Evals (Minggu 11)
 
-1. Eval harness: query set + expected docs/citations untuk hitung recall@k, MRR
-2. Tracing: log tiap chat request dengan timing breakdown (retrieve, embed, stream, tool)
-3. Metrics dashboard sederhana (response time p50/p95, tool usage frequency, error rate)
-4. Conversation quality scoring (LLM-as-judge)
+**Observability**: setiap chat request di-instrument dengan tracer yang collect spans + counters. Persist async ke `chat_traces` table (migration 008). `/observability` page tampilin metrics + timing per stage + tool usage frequency.
+
+Spans yang di-track:
+- `memory_retrieve` — durasi retrieval memory (Minggu 10)
+- `rag_retrieve` — durasi hybrid + rerank (Minggu 6)
+- `llm_stream` — durasi Groq stream (per iterasi tool loop, tag `iter`, `finish_reason`, tokens)
+- `tool_exec` — durasi tool run (tag `tool` name)
+
+Counters aggregated per trace: prompt/completion tokens, memory count, sources count, tool calls count.
+
+Metrics endpoint `/observability/metrics` compute: P50/P95 latency, avg per-stage duration, tool usage frequency, total tokens, error count. Sample size configurable (default 100 recent).
+
+**Evals**:
+- **Retrieval quality** (`/eval-sets` + `/eval-runs/retrieval`): user bikin golden set (query + expected document IDs), trigger run → jalanin retrieval pipeline (embed + hybrid + rerank) → hitung recall@k dan MRR per query, aggregate ke average. Simpan hasil di `eval_runs` untuk trend tracking.
+- **LLM-as-judge** (`/eval-runs/judge`): pilih 1 assistant message, kirim ke Groq Llama instant dengan judge prompt, dapetin faithfulness + helpfulness scores 1-5 + reasoning. Berguna sebagai signal cepat kalau prompt engineering / model swap ngaruh ke quality.
+
+**FE pages baru**: `/observability` (metrics + recent traces dengan colored span bar) dan `/evals` (query set CRUD, run history, judge results).
+
+## What's Next (Minggu 12 — Polish, security & showcase)
+
+1. Rate limiting + abuse prevention
+2. Security audit (input sanitization, CSP, dependency scan)
+3. Landing page + docs site
+4. Demo video / screencast
+5. Portfolio deployment showcase
 
 Detail lengkap di [Roadmap doc](https://docs.google.com/document/d/1yNJwtVLvIDWOd37nubd3-IQaeSPgBmbin-lANCMnh28/edit).
 
