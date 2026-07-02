@@ -78,7 +78,9 @@ func (r *TaskRepo) ListByUser(ctx context.Context, userID string, filter TaskFil
 		q += ` AND due_date IS NULL`
 	}
 
-	q += ` ORDER BY completed ASC, due_date NULLS LAST ASC, created_at ASC LIMIT $` + ph(len(args)+1)
+	// PENTING: Postgres syntax `<column> ASC/DESC NULLS LAST` — direction dulu,
+	// baru NULLS LAST. Reversed (NULLS LAST ASC) throws "syntax error at ASC".
+	q += ` ORDER BY completed ASC, due_date ASC NULLS LAST, created_at ASC LIMIT $` + ph(len(args)+1)
 	args = append(args, limit)
 
 	rows, err := r.pool.Query(ctx, q, args...)

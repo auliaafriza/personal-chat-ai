@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"time"
 
@@ -33,6 +34,8 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 		Due:    q.Get("due"),
 	}, 200)
 	if err != nil {
+		log.Printf("[Tasks] list failed for user=%s status=%q due=%q: %v",
+			user.ID, q.Get("status"), q.Get("due"), err)
 		writeError(w, http.StatusInternalServerError, "failed to list tasks")
 		return
 	}
