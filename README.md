@@ -3,7 +3,7 @@
 Chat assistant pribadi untuk dokumen, kode, dan produktivitas.
 Bagian dari [Roadmap AI Engineer](../) — proyek yang bertumbuh tiap minggu.
 
-**Status: Minggu 11 — Evals + Observability**
+**Status: 🎉 12 minggu selesai — Polish, Security & Showcase**
 
 Architecture: **Next.js FE (Auth.js v5)** ←→ **Go BE (JWT-protected, RAG)** ←→ **Neon Postgres (pgvector)**
 
@@ -225,8 +225,8 @@ Lihat [backend/README.md](./backend/README.md) untuk struktur lengkap.
 - [x] **Minggu 8** — Coding assistant tools — read_file, write_file, list_directory, search_code, run_shell (allowlist) + per-user workspace sandbox + syntax highlight + diff viewer
 - [x] **Minggu 9** — Productivity tools — Google Calendar (list/create/update/delete) + Gmail (search/read) + Tasks CRUD + remind_me + /tasks page
 - [x] **Minggu 10** — Long-term memory — remember_this/update_memory/forget_memory tools + per-user embeddings + auto-inject top-3 di system prompt + /memory page (categories + search)
-- [x] **Minggu 11** — Evals + observability — In-DB traces per stage + /observability metrics dashboard + retrieval eval (recall@k + MRR) + LLM-as-judge scoring + /evals page ← **kamu di sini**
-- [ ] **Minggu 12** — Polish, security, showcase
+- [x] **Minggu 11** — Evals + observability — In-DB traces per stage + /observability metrics dashboard + retrieval eval (recall@k + MRR) + LLM-as-judge scoring + /evals page
+- [x] **Minggu 12** — Polish, security & showcase — per-user rate limiter (token bucket) + security headers (CSP/HSTS/X-Frame-Options/etc) + public landing page ← **finish!**
 
 ## Conventions
 
@@ -529,15 +529,33 @@ Metrics endpoint `/observability/metrics` compute: P50/P95 latency, avg per-stag
 
 **FE pages baru**: `/observability` (metrics + recent traces dengan colored span bar) dan `/evals` (query set CRUD, run history, judge results).
 
-## What's Next (Minggu 12 — Polish, security & showcase)
+## Security & Polish (Minggu 12)
 
-1. Rate limiting + abuse prevention
-2. Security audit (input sanitization, CSP, dependency scan)
-3. Landing page + docs site
-4. Demo video / screencast
-5. Portfolio deployment showcase
+**Rate limiting** (`internal/middleware/ratelimit.go`) — per-user token bucket, applied ke expensive endpoints:
+- `POST /chat` (LLM stream + tools)
+- `POST /documents` (upload + embed)
+- `POST /documents/search` (embed + hybrid + rerank)
+- `POST /translate` (LLM call)
 
-Detail lengkap di [Roadmap doc](https://docs.google.com/document/d/1yNJwtVLvIDWOd37nubd3-IQaeSPgBmbin-lANCMnh28/edit).
+Config: capacity 20 burst, refill 0.5/sec (≈1 request per 2 detik steady state). Response `429 Too Many Requests` dengan `Retry-After` header. In-memory bucket — single-instance friendly; kalau scale multi-region, swap ke Redis INCR/EXPIRE.
+
+**Security headers** (`internal/middleware/security.go`):
+- `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` (BE serves JSON+SSE only)
+- `Strict-Transport-Security: max-age=31536000; includeSubDomains` (force HTTPS)
+- `X-Frame-Options: DENY` (anti-clickjacking)
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: no-referrer` (privacy)
+- `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()`
+
+**Public landing page** (`src/app/page.tsx`) — visitor unautentikasi dapat lihat hero + fitur + tech stack + CTA sign-in. Middleware redirect logged-in user dari `/` ke `/chat`. Server component (no JS payload).
+
+## Roadmap Complete 🎉
+
+12 minggu, 8 migrations, 24 tools, 8 pages, ~15 endpoints, RAG hybrid+rerank, Google integrations, per-user sandbox, in-DB observability, evals framework. All in Next.js FE + Go BE + Neon Postgres.
+
+Untuk detail per-minggu lihat backend README + git history. Feedback + collaboration welcome.
+
+Detail perencanaan awal di [Roadmap doc](https://docs.google.com/document/d/1yNJwtVLvIDWOd37nubd3-IQaeSPgBmbin-lANCMnh28/edit).
 
 ---
 

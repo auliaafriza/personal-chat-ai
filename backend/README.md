@@ -335,4 +335,10 @@ Memory retrieval lebih sederhana dari RAG: cuma cosine vector (no BM25, no reran
 - `POST /eval-runs/retrieval` — trigger retrieval eval (butuh evalSetId)
 - `POST /eval-runs/judge` — trigger judge eval (butuh messageId)
 
-Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer Minggu 11.
+## Polish + Security (Minggu 12)
+
+**Rate limiter** (`internal/middleware/ratelimit.go`) — token bucket in-memory per-user, applied ke expensive endpoints via `r.With(expensiveLimiter.Middleware)`. Config 20 burst + refill 0.5/sec. Response 429 dengan Retry-After header. Thread-safe via sync.Mutex.
+
+**Security headers** (`internal/middleware/security.go`) — apply globally via `r.Use(appmw.SecurityHeaders)`. CSP restrictive (BE cuma JSON + SSE), HSTS 1-year, X-Frame-Options DENY, nosniff, no-referrer, disable unused browser APIs.
+
+Part of [PersonalChatAI-Aulia](../README.md) — Roadmap AI Engineer 12 minggu selesai 🎉.

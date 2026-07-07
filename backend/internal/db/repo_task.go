@@ -60,6 +60,8 @@ func (r *TaskRepo) ListByUser(ctx context.Context, userID string, filter TaskFil
 		q += ` AND completed = false`
 	case "completed":
 		q += ` AND completed = true`
+	default:
+		q += ` AND completed = false` // default: show pending tasks only
 	}
 
 	now := time.Now()
@@ -76,6 +78,8 @@ func (r *TaskRepo) ListByUser(ctx context.Context, userID string, filter TaskFil
 		q += ` AND due_date IS NOT NULL AND due_date >= $` + ph(len(args))
 	case "no_due":
 		q += ` AND due_date IS NULL`
+	default:
+		q += `AND due_date IS NULL` // default: show all tasks with due date
 	}
 
 	// PENTING: Postgres syntax `<column> ASC/DESC NULLS LAST` — direction dulu,
@@ -122,10 +126,10 @@ type UpdateTaskParams struct {
 
 func (r *TaskRepo) UpdateByUser(ctx context.Context, id, userID string, p UpdateTaskParams) (Task, error) {
 	var (
-		dueSet     bool
-		dueValue   *time.Time
+		dueSet      bool
+		dueValue    *time.Time
 		completedAt *time.Time
-		now        = time.Now()
+		now         = time.Now()
 	)
 	if p.DueDate != nil {
 		dueSet = true

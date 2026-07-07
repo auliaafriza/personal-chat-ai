@@ -64,6 +64,7 @@ func run() error {
 	embedder := service.NewEmbedder(cfg.VoyageAPIKey)
 	reranker := service.NewReranker(cfg.VoyageAPIKey)
 	retriever := service.NewRetriever(docRepo, embedder, reranker)
+	translator := service.NewTranslator(anthropicSvc)
 
 	// Workspace (Minggu 8) — per-user sandbox folder utk coding tools.
 	ws, err := workspace.New(cfg.WorkspaceRoot)
@@ -101,6 +102,8 @@ func run() error {
 		tools.NewRememberThis(memoryRepo, embedder),
 		tools.NewForgetMemory(memoryRepo),
 		tools.NewUpdateMemoryTool(memoryRepo, embedder),
+		// Translation tool
+		tools.NewTranslate(translator),
 	)
 	if cfg.TavilyAPIKey != "" {
 		toolReg.Register(tools.NewWebSearch(cfg.TavilyAPIKey))
@@ -126,6 +129,9 @@ func run() error {
 	observabilityH := handler.NewObservabilityHandler(traceRepo)
 	evalH := handler.NewEvalHandler(evalRepo, msgRepo, convRepo, retrievalEv, judgeEv)
 
+	// Translation (on-demand endpoint)
+	translateH := handler.NewTranslateHandler(translator)
+
 	// Middleware
 	authMw := appmw.Auth(cfg.AuthSecret, userRepo)
 
@@ -133,6 +139,7 @@ func run() error {
 	r := chi.NewRouter()
 
 	r.Use(appmw.Logger)
+	r.Use(appmw.SecurityHeaders)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -147,6 +154,11 @@ func run() error {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
+
+	// Rate limiter untuk expensive endpoints (Minggu 12).
+	// Capacity 20 burst, refill 0.5/sec = steady 1 req per 2 sec. Cukup lega
+	// untuk chat interaktif + upload dokumen sesekali; block flood/abuse.
+	expensiveLimiter := appmw.PerUser(20, 0.5)
 
 	// Protected routes (require valid JWT)
 	r.Group(func(r chi.Router) {
@@ -169,14 +181,14 @@ func run() error {
 			})
 		})
 
-		// Streaming chat
-		r.Post("/chat", chatH.Stream)
+		// Streaming chat (rate-limited)
+		r.With(expensiveLimiter.Middleware).Post("/chat", chatH.Stream)
 
-		// Documents (Minggu 4)
+		// Documents (Minggu 4) — upload + search rate-limited
 		r.Route("/documents", func(r chi.Router) {
 			r.Get("/", docH.List)
-			r.Post("/", docH.Upload)
-			r.Post("/search", docH.Search)
+			r.With(expensiveLimiter.Middleware).Post("/", docH.Upload)
+			r.With(expensiveLimiter.Middleware).Post("/search", docH.Search)
 			r.Route("/{id}", func(r chi.Router) {
 				r.Get("/", docH.Get)
 				r.Delete("/", docH.Delete)
@@ -214,6 +226,9 @@ func run() error {
 			r.Post("/retrieval", evalH.RunRetrievalEval)
 			r.Post("/judge", evalH.RunJudgeEval)
 		})
+
+		// Translation (on-demand, rate-limited)
+		r.With(expensiveLimiter.Middleware).Post("/translate", translateH.Translate)
 	})
 
 	// HTTP server with graceful shutdown

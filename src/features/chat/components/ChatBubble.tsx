@@ -3,6 +3,7 @@
 import type { ToolInvocation } from "ai"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
+import { useState } from "react"
 
 import { cn } from "@/lib/utils"
 
@@ -11,6 +12,7 @@ import type { Source } from "@/features/chat/types/api"
 import { CodeBlock } from "./CodeBlock"
 import { SourcesFooter } from "./SourcesFooter"
 import { ToolInvocationCard } from "./ToolInvocationCard"
+import { TranslateToggle } from "./TranslateToggle"
 
 interface ChatBubbleProps {
   role: "user" | "assistant" | "system" | "data"
@@ -42,6 +44,10 @@ const markdownComponents: Components = {
 
 export function ChatBubble({ role, content, sources, toolInvocations }: ChatBubbleProps) {
   const isUser = role === "user"
+  // Translate override state — kalau non-null, render translated version instead of `content`.
+  const [translated, setTranslated] = useState<string | null>(null)
+  const displayContent = translated ?? content
+  const canTranslate = !isUser && content.length > 0
 
   return (
     <div className={cn("flex w-full animate-fade-in", isUser ? "justify-end" : "justify-start")}>
@@ -64,14 +70,23 @@ export function ChatBubble({ role, content, sources, toolInvocations }: ChatBubb
                 ))}
               </div>
             ) : null}
-            {content ? (
+            {displayContent ? (
               <div className="prose-chat">
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                  {content}
+                  {displayContent}
                 </ReactMarkdown>
               </div>
             ) : null}
             {sources && sources.length > 0 ? <SourcesFooter sources={sources} /> : null}
+            {canTranslate ? (
+              <div className="mt-1 flex justify-end border-t border-border/40 pt-1">
+                <TranslateToggle
+                  content={content}
+                  showingTranslation={translated !== null}
+                  onSwapContent={setTranslated}
+                />
+              </div>
+            ) : null}
           </>
         )}
       </div>

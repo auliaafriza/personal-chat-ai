@@ -19,6 +19,7 @@ import {
   FolderOpen,
   Globe,
   Inbox,
+  Languages,
   ListTodo,
   Loader2,
   type LucideIcon,
@@ -98,6 +99,12 @@ function metaFor(toolName: string, args: unknown): ToolMeta {
       return { Icon: Eraser, label: "Lupakan memory" }
     case "update_memory":
       return { Icon: BrainCircuit, label: "Update memory" }
+    // Translate
+    case "translate":
+      return {
+        Icon: Languages,
+        label: `Translate → ${String(a.target ?? "").toUpperCase()}: "${truncate(String(a.text ?? ""), 40)}"`,
+      }
     default:
       return { Icon: Wrench, label: `Tool: ${toolName}` }
   }
