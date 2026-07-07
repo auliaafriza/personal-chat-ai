@@ -4,17 +4,23 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/auliaafriza/personalgpt-backend/internal/service"
 )
 
-// TranslateTool wraps service.Translator sebagai chat tool.
-// LLM bisa panggil kalau user minta translate ("terjemahkan…", "translate to English…", dll).
-type TranslateTool struct {
-	translator *service.Translator
+// translatorInterface — sub-interface buat break import cycle.
+// service package imports tools (untuk Schema/ToolCallRequest types), jadi
+// tools NGGAK BOLEH import service. Instead, main.go inject service.Translator
+// yang satisfy interface ini.
+type translatorInterface interface {
+	Translate(ctx context.Context, text, source, target string) (string, error)
 }
 
-func NewTranslate(translator *service.Translator) *TranslateTool {
+// TranslateTool wraps translator sebagai chat tool.
+// LLM bisa panggil kalau user minta translate ("terjemahkan…", "translate to English…", dll).
+type TranslateTool struct {
+	translator translatorInterface
+}
+
+func NewTranslate(translator translatorInterface) *TranslateTool {
 	return &TranslateTool{translator: translator}
 }
 
