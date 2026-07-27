@@ -1,6 +1,115 @@
 # Personal Chat AI by Aulia
 
-Chat assistant pribadi untuk dokumen, kode, dan produktivitas.
+> Chat assistant pribadi dengan RAG hybrid+rerank, 24 tools, long-term memory, dan observability. Built solo dalam 12 minggu sebagai portfolio project transisi Frontend Engineer → AI Engineer.
+
+🔗 **[Live Demo](https://personalchat.aulia.dev)** · 🎥 **[Video Walkthrough (3 menit)](./DEMO_SCRIPT.md)** · 📖 **[Deployment Guide](./DEPLOYMENT.md)**
+
+![status](https://img.shields.io/badge/status-shipped-brightgreen) ![weeks](https://img.shields.io/badge/build_time-12_weeks-blue) ![stack](https://img.shields.io/badge/stack-Next.js%20%2B%20Go%20%2B%20Postgres-informational)
+
+---
+
+## Case Study
+
+### Problem
+
+Chat AI general purpose (ChatGPT, Claude web) bagus untuk tanya-jawab umum, tapi:
+- Nggak inget konteks lintas conversation kecuali kamu manually kasih tahu ulang
+- Nggak bisa search dokumen pribadi kamu tanpa upload manual + hilang saat session baru
+- Nggak bisa dipersonalisasi ke tone/language preferences
+- Kalau butuh tool spesifik (kalender, gmail, coding sandbox) harus keluar aplikasi
+
+**Personal Chat AI by Aulia** solve ini dengan menggabungkan:
+1. **RAG per-user** (upload sekali, retrievable selamanya)
+2. **Long-term memory** (fakta persistent tentang user, auto-inject setiap chat)
+3. **24 tools** (web search, calendar, gmail, coding sandbox, math, translate, dll)
+4. **Per-user sandboxed workspace** (Go filesystem, hardened path validation)
+5. **Full observability** (setiap request in-DB traces + evals framework)
+
+### Architecture
+
+```
+┌────────────────────┐         HTTPS + Bearer JWT (HS256)         ┌──────────────────────┐
+│  Next.js 15 (FE)   │ ◄─────────────────────────────────────────►│    Go 1.25 (BE)      │
+│                    │                                             │                      │
+│  • Auth.js v5      │       POST /chat (streaming SSE)           │  • chi router        │
+│  • useChat streaming│      GET  /documents, /memories, /tasks    │  • pgx (no ORM)      │
+│  • Radix + Tailwind │      POST /translate, /eval-runs           │  • Auth middleware   │
+│                    │                                             │  • Rate limiter      │
+└────────┬───────────┘                                             │  • Tool registry (24)│
+         │                                                          └────────┬─────────────┘
+         │ /api/token — mint HS256 JWT dari session                          │
+         │ /api/auth/[...nextauth] — Google OAuth flow                       │
+         │                                                                    │
+         └── Google OAuth (scopes: calendar + gmail.readonly)                │
+                                                                              │
+              ┌───────────────────────────────────────────────────────────────┘
+              │
+              ▼
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│                       Neon Postgres (managed, pgvector)                            │
+│                                                                                    │
+│   users · conversations · messages(+sources) · documents · chunks(+embedding+tsv) │
+│   memories(+embedding) · tasks · chat_traces · eval_sets · eval_runs               │
+│                                                                                    │
+│   Indexes: HNSW cosine (embedding), GIN (tsvector), btree (per-user filters)      │
+└───────────────────────────────────────────────────────────────────────────────────┘
+              ▲                       ▲                        ▲
+              │                       │                        │
+        Voyage AI                   Groq                    Tavily
+     voyage-3-lite (embed)     Llama chat + tools     Web search (opsional)
+      + rerank-2                                       + Google Calendar/Gmail APIs
+```
+
+**Chat flow (per request)**:
+```
+User message
+  → Retrieve memory (top-3 cosine)   ─┐
+  → Retrieve docs (hybrid+rerank top-5)│ inject to system prompt
+  → Tool loop (max 5 iter):            │
+      Groq stream → tool_calls? → execute → append → continue
+  → Save assistant msg + sources
+  → Persist trace async
+```
+
+### Tech Decisions
+
+| Decision | Choice | Alternatif ditolak | Alasan |
+|---|---|---|---|
+| **Backend language** | Go (chi + pgx) | Node.js, Python (FastAPI) | Ingin proper concurrency untuk SSE streaming + tool exec paralel; type safety tanpa TS complexity; single binary deploy. |
+| **DB** | Neon Postgres | Supabase, self-hosted | Managed serverless, generous free tier, pgvector native + tsvector built-in — nggak butuh separate vector DB. |
+| **Vector search** | pgvector (HNSW) + BM25 RRF | Pinecone, Weaviate, standalone Qdrant | Single DB = simpler ops + JOIN dengan data lain. HNSW cukup performant untuk personal scale. |
+| **Rerank** | Voyage rerank-2 | Cohere rerank | Sama API key sebagai embeddings, free tier generous, output consistent. |
+| **Embeddings** | Voyage voyage-3-lite (512d) | OpenAI text-embedding-3 | Free 200M tokens/bulan, cocok untuk portfolio budget. Dimension 512 = HNSW index compact. |
+| **Chat LLM** | Groq (Llama 3.3 70B) | OpenAI, Anthropic API | Fastest inference publicly available, generous free tier, OpenAI-compatible = swap kalau perlu. |
+| **Auth** | Auth.js v5 + HS256 JWT ke BE | Session cookie, Firebase Auth | Stateless BE, cocok multi-region; shared secret pattern sederhana; Google OAuth handled. |
+| **Streaming protocol** | Vercel AI SDK data stream v1 | Custom SSE, WebSocket | Reuse frontend `useChat` hook — nggak perlu bikin stream parser sendiri. |
+| **Tools calling** | Native OpenAI-compatible di Groq | LangChain agent, custom loop | Model native calling → predictable + fast; loop di-manage di handler (control jelas). |
+| **Deployment** | Railway (BE) + Vercel (FE) | Fly.io, self-hosted | Zero-config Docker, volume support out of box, generous free tier. |
+
+### Trade-offs
+
+Yang di-*sacrifice* dan kenapa OK untuk scope ini:
+
+- **Single instance rate limiter** (in-memory token bucket) → nggak sync antar replica. OK karena portfolio single-region; upgrade ke Redis kalau scale ke multi-region.
+- **In-DB observability** → nggak semature Grafana/Datadog. OK karena portfolio self-contained; queries simple + retention manual via prune.
+- **Tool invocations nggak persisted** → reload conversation = tool cards hilang tapi final text ada. OK untuk MVP; bisa tambah `tool_calls JSONB` column kalau perlu.
+- **Fine-tuned model belum ada** → semua chat pakai Groq generic model. OK karena RAG + prompt engineering cukup untuk personal use case; fine-tune ada di roadmap v2.
+- **Test coverage minimal** → static review + smoke test manual. Trade-off shipping speed vs safety net; would add unit tests kalau team > 1 dev.
+
+### What I learned
+
+Highlights dari 12 minggu build (detail per minggu di [git log](https://github.com/auliaafriza/personalgpt-backend/commits/main) + [Roadmap doc](https://docs.google.com/document/d/1yNJwtVLvIDWOd37nubd3-IQaeSPgBmbin-lANCMnh28/edit)):
+
+1. **AI SDK data stream protocol** butuh strict frame ordering (`f:` → `9:` → `e:` → `a:` → `0:` → `e:` → `d:`). Salah urutan = parser crash silently, error toast di FE walau BE succeed. Debug ini penting untuk multi-turn tool loop.
+2. **Hybrid search (vector + BM25 RRF) > pure vector** untuk query yang mention term unik. Nama produk, ID, kode → BM25 menyelamatkan. Sinonim/paraphrase → vector unggul. Combined jauh lebih robust.
+3. **Rerank stage 2** worth latency-nya (~200ms extra) untuk quality jump signifikan. Bi-encoder embedding untuk recall, cross-encoder rerank untuk precision.
+4. **Per-user sandboxed FS di Go** perlu 3 layer defense: reject absolute path, reject `..` segments, verify via `filepath.Rel` bahwa resolved path masih di user dir. Skip 1 layer = vulnerable.
+5. **In-DB traces > external APM** untuk portfolio: self-contained, easy query, cost nol. Untuk production real, tetap butuh proper distributed tracing.
+
+---
+
+## Roadmap tracking (build log)
+
 Bagian dari [Roadmap AI Engineer](../) — proyek yang bertumbuh tiap minggu.
 
 **Status: 🎉 12 minggu selesai — Polish, Security & Showcase**
