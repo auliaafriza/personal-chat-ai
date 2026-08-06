@@ -1,0 +1,77 @@
+{
+  "task": "Indonesian customer support intent classification",
+  "language": "id",
+  "num_classes": 10,
+  "intents": [
+    {
+      "label": "check_order_status",
+      "id": 0,
+      "description_id": "User tanya progress pengiriman, tracking pesanan, estimasi kapan sampai. Termasuk tanya nomor resi dan status di sisi kurir.",
+      "description_en": "Ask about order/shipping status, tracking, ETA delivery",
+      "routing": "shipping_team"
+    },
+    {
+      "label": "request_refund",
+      "id": 1,
+      "description_id": "User minta refund pengembalian dana untuk pesanan yang sudah return, komplain refund belum masuk ke rekening, atau tanya proses refund.",
+      "description_en": "Request money refund, follow-up on refund status",
+      "routing": "finance_team"
+    },
+    {
+      "label": "product_complaint",
+      "id": 2,
+      "description_id": "User komplain kondisi barang setelah diterima — rusak, tidak sesuai deskripsi/foto, palsu/KW, kurang komponen, kualitas jelek. TIDAK termasuk masalah packaging (itu shipping_issue).",
+      "description_en": "Complain about product condition — damaged, not as described, counterfeit",
+      "routing": "product_team"
+    },
+    {
+      "label": "product_inquiry",
+      "id": 3,
+      "description_id": "User tanya info produk sebelum beli — spesifikasi, stok, ukuran, warna varian, ready ga, harga, restock. Pertanyaan aktif tentang produk yang belum dibeli.",
+      "description_en": "Ask product info before purchase — spec, stock, size, color, price",
+      "routing": "sales_team"
+    },
+    {
+      "label": "payment_issue",
+      "id": 4,
+      "description_id": "Masalah proses pembayaran — bayar gagal, error saat checkout, double charge, dana kepotong tapi order gagal, metode pembayaran tidak tersedia.",
+      "description_en": "Payment process problem — failed, double charge, method issue",
+      "routing": "payment_team"
+    },
+    {
+      "label": "shipping_issue",
+      "id": 5,
+      "description_id": "Masalah pengiriman SELAIN tracking status — paket rusak/basah pas diterima, salah alamat, kurir tidak sopan, ongkir salah, retur ke seller. Bukan tanya kapan sampai.",
+      "description_en": "Shipping problem — damaged package, wrong address, courier issue",
+      "routing": "shipping_team"
+    },
+    {
+      "label": "cancel_order",
+      "id": 6,
+      "description_id": "User minta cancel pesanan yang belum dikirim atau baru dibuat. Beda dari refund (refund untuk barang sudah diterima lalu return).",
+      "description_en": "Cancel a pending/new order (not yet shipped)",
+      "routing": "order_team"
+    },
+    {
+      "label": "account_help",
+      "id": 7,
+      "description_id": "Masalah akun user — gabisa login, lupa password, ganti email/nomor HP, verifikasi akun, akun kena banned/suspend, keamanan akun.",
+      "description_en": "Account issues — login, password, verification, security",
+      "routing": "account_team"
+    },
+    {
+      "label": "promo_voucher",
+      "id": 8,
+      "description_id": "Tanya promo/voucher/cashback/flash sale/event khusus — voucher expired, gimana claim, ada promo apa hari ini, cashback belum masuk.",
+      "description_en": "Ask about promo, voucher, cashback, discount event",
+      "routing": "marketing_team"
+    },
+    {
+      "label": "general_greeting",
+      "id": 9,
+      "description_id": "Salam pembuka, thank you, small talk, response singkat yang tidak actionable (halo, oke sip, makasih ya, minggu bro).",
+      "description_en": "Greeting, thanks, small talk — not actionable",
+      "routing": "fallback"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{"id": "seed_0022", "text": "kok kena charge 2 kali ya untuk order yang sama?", "label": "payment_issue", "source": "seed"}
+{"id": "seed_0038", "text": "otp verifikasi ga masuk2 ke nomor saya", "label": "account_help", "source": "seed"}
+{"id": "seed_0030", "text": "isi paket kurang 1 item padahal invoice ada 3", "label": "shipping_issue", "source": "seed"}
+{"id": "seed_0035", "text": "gimana batalin order yg statusnya masih pending confirmation?", "label": "cancel_order", "source": "seed"}
+{"id": "seed_0001", "text": "min pesanan gw kapan sampe ya? udah 3 hari nih", "label": "check_order_status", "source": "seed"}
+{"id": "seed_0005", "text": "estimasi sampai kapan ya untuk order #ORD-8891?", "label": "check_order_status", "source": "seed"}
+{"id": "seed_0033", "text": "mau cancel pesanan yang blm dikirim, gmn caranya?", "label": "cancel_order", "source": "seed"}
+{"id": "seed_0043", "text": "cashback belum masuk padahal syarat udh dipenuhi semua", "label": "promo_voucher", "source": "seed"}
+{"id": "seed_0007", "text": "Mau refund untuk pesanan yang salah kirim, gimana caranya kak?", "label": "request_refund", "source": "seed"}
+{"id": "seed_0046", "text": "halo min", "label": "general_greeting", "source": "seed"}
+{"id": "seed_0029", "text": "ongkir kok tiba2 naik pas checkout, mahal amat", "label": "shipping_issue", "source": "seed"}
+{"id": "seed_0011", "text": "barang dateng dalam kondisi rusak parah, layar retak semua", "label": "product_complaint", "source": "seed"}
+{"id": "seed_0049", "text": "sip mantap min", "label": "general_greeting", "source": "seed"}
+{"id": "seed_0039", "text": "akun sy kena suspend kenapa ya? blm pernah violate", "label": "account_help", "source": "seed"}
+{"id": "seed_0042", "text": "ada promo apa hari ini min?", "label": "promo_voucher", "source": "seed"}
+{"id": "seed_0016", "text": "kak ada size L untuk baju hitam yg ini?", "label": "product_inquiry", "source": "seed"}
+{"id": "seed_0015", "text": "hp baru kok layarnya udah ada garis? dari pabrikan atau gimana", "label": "product_complaint", "source": "seed"}
+{"id": "seed_0010", "text": "min kok dana refund saya blm masuk rekening ya udh 10 hr", "label": "request_refund", "source": "seed"}
+{"id": "seed_0021", "text": "min bayar terus gagal padahal saldo cukup", "label": "payment_issue", "source": "seed"}
+{"id": "seed_0020", "text": "kapan restock warna hitam kak? udah 2 minggu sold out", "label": "product_inquiry", "source": "seed"}

@@ -1,0 +1,28 @@
+# Fine-tuning lab dependencies
+
+# HuggingFace core
+transformers>=4.45.0
+datasets>=3.0.0
+accelerate>=1.0.0
+peft>=0.13.0                    # LoRA
+trl>=0.11.0                     # SFTTrainer
+bitsandbytes>=0.44.0            # 4-bit quantization untuk QLoRA (opsional)
+
+# Base model
+torch>=2.4.0
+sentencepiece>=0.2.0            # Tokenizer
+
+# Evaluation
+scikit-learn>=1.5.0             # accuracy, f1, classification_report
+seaborn>=0.13.0                 # confusion matrix heatmap
+matplotlib>=3.9.0
+pandas>=2.2.0
+
+# Data generation (Groq via httpx)
+httpx>=0.27.0
+python-dotenv>=1.0.0
+tqdm>=4.66.0
+
+# Optional deployment
+gradio>=5.0.0                   # HF Spaces demo (Minggu 7)
+huggingface-hub>=0.25.0

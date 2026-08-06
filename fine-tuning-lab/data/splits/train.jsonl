@@ -1,0 +1,30 @@
+{"id": "seed_0045", "text": "flash sale jam berapa mulainya kak?", "label": "promo_voucher", "source": "seed"}
+{"id": "seed_0047", "text": "oke siap, makasih ya info nya", "label": "general_greeting", "source": "seed"}
+{"id": "seed_0006", "text": "min duit refund gw kapan cair sih udah 2 minggu", "label": "request_refund", "source": "seed"}
+{"id": "seed_0048", "text": "thank you", "label": "general_greeting", "source": "seed"}
+{"id": "seed_0012", "text": "produk yg saya terima beda banget sama gambar :(", "label": "product_complaint", "source": "seed"}
+{"id": "seed_0032", "text": "min tolong cancel order gw belum jadi beli", "label": "cancel_order", "source": "seed"}
+{"id": "seed_0028", "text": "min kok kirim ke alamat lama? padahal udah update di profile", "label": "shipping_issue", "source": "seed"}
+{"id": "seed_0027", "text": "kurirnya nyimpen paket di depan pagar aja ga bilang", "label": "shipping_issue", "source": "seed"}
+{"id": "seed_0024", "text": "dana kepotong tapi order gagal, mohon dicek", "label": "payment_issue", "source": "seed"}
+{"id": "seed_0040", "text": "mau ganti nomor HP yang terdaftar di akun, bisa?", "label": "account_help", "source": "seed"}
+{"id": "seed_0041", "text": "voucher 50rb udah expired belom yg dr kmrn?", "label": "promo_voucher", "source": "seed"}
+{"id": "seed_0008", "text": "refund belum masuk padahal katanya 3-7 hari kerja", "label": "request_refund", "source": "seed"}
+{"id": "seed_0036", "text": "min gabisa login akun terus error", "label": "account_help", "source": "seed"}
+{"id": "seed_0018", "text": "harga best gimana kalau ambil 3pcs sekaligus?", "label": "product_inquiry", "source": "seed"}
+{"id": "seed_0004", "text": "gan udah 5 hari kok belum ada update tracking sama sekali", "label": "check_order_status", "source": "seed"}
+{"id": "seed_0031", "text": "batalin dong pesanan #78901 salah pilih ukuran", "label": "cancel_order", "source": "seed"}
+{"id": "seed_0014", "text": "sepatu yg dikirim ukurannya salah, minta 42 dikirim 40", "label": "product_complaint", "source": "seed"}
+{"id": "seed_0019", "text": "spec RAM nya berapa ya min? di deskripsi ga jelas", "label": "product_inquiry", "source": "seed"}
+{"id": "seed_0017", "text": "warna biru masih ready ga min?", "label": "product_inquiry", "source": "seed"}
+{"id": "seed_0050", "text": "pagi kak boleh nanya nih", "label": "general_greeting", "source": "seed"}
+{"id": "seed_0003", "text": "pesanan sy statusnya masih dikemas dari kemarin, tolong dicek", "label": "check_order_status", "source": "seed"}
+{"id": "seed_0025", "text": "OVO ga bisa dipake buat bayar dari kemarin", "label": "payment_issue", "source": "seed"}
+{"id": "seed_0009", "text": "tolong refund pesanan #12345 barangnya nggak sesuai", "label": "request_refund", "source": "seed"}
+{"id": "seed_0026", "text": "paket dateng udah rusak, kardusnya penyok parah", "label": "shipping_issue", "source": "seed"}
+{"id": "seed_0023", "text": "kartu kredit ditolak terus, error unknown", "label": "payment_issue", "source": "seed"}
+{"id": "seed_0037", "text": "lupa password akun, gimana reset nya?", "label": "account_help", "source": "seed"}
+{"id": "seed_0002", "text": "Kak cek resi dong nomor JNE12345", "label": "check_order_status", "source": "seed"}
+{"id": "seed_0044", "text": "kode voucher WELCOME50 ga bisa dipake katanya invalid", "label": "promo_voucher", "source": "seed"}
+{"id": "seed_0013", "text": "min ini barangnya KW yaa? kualitas jelek banget beda sama toko sebelah", "label": "product_complaint", "source": "seed"}
+{"id": "seed_0034", "text": "kak cancel dulu ya orderan tadi malem, salah alamat", "label": "cancel_order", "source": "seed"}
